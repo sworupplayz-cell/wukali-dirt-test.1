@@ -17,7 +17,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 22
           cache: 'npm'
 
       - name: Install Dependencies
@@ -25,9 +25,6 @@ jobs:
 
       - name: Build Web Application
         run: npm run build
-
-      - name: Ensure Capacitor CLI is present
-        run: npm install @capacitor/cli @capacitor/core @capacitor/android
 
       - name: Sync Capacitor Android
         run: npx cap sync android
