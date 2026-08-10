@@ -3,8 +3,8 @@ name: Build Android APK
 on:
   push:
     branches:
-      - main  # Runs whenever you push to main (change if your branch is named 'master')
-  workflow_dispatch:  # Allows manual triggering from GitHub UI
+      - main
+  workflow_dispatch:
 
 jobs:
   build:
@@ -20,24 +20,20 @@ jobs:
           node-version: 18
           cache: 'npm'
 
-      - name: Install Project Dependencies
+      - name: Install Dependencies
         run: npm ci
 
-      - name: Build Web Application
+      - name: Build Web Assets
         run: npm run build
-
-      - name: Install Capacitor & Android Support
-        run: |
-          npm install @capacitor/core @capacitor/cli @capacitor/android
-          npx cap init "Wukali Dirt Arena" "com.wukalidirt.app" --web-dir dist
-          npx cap add android
-          npx cap sync android
 
       - name: Setup Java JDK
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
+
+      - name: Sync Capacitor Android
+        run: npx cap sync android
 
       - name: Build APK with Gradle
         run: |
