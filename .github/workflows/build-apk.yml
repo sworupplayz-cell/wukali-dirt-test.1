@@ -23,17 +23,20 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      - name: Build Web Assets
+      - name: Build Web Application
         run: npm run build
+
+      - name: Ensure Capacitor CLI is present
+        run: npm install @capacitor/cli @capacitor/core @capacitor/android
+
+      - name: Sync Capacitor Android
+        run: npx cap sync android
 
       - name: Setup Java JDK
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-
-      - name: Sync Capacitor Android
-        run: npx cap sync android
 
       - name: Build APK with Gradle
         run: |
