@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Wukali Dirt Arena</string>
+    <string name="title_activity_main">Wukali Dirt Arena</string>
+    <string name="package_name">com.wukalidirt.app</string>
+    <string name="custom_url_scheme">com.wukalidirt.app</string>
+</resources>
