@@ -1,0 +1,32 @@
+{
+  "name": "wukali-dirt",
+  "version": "0.1.0",
+  "description": "Lightweight Android-first 3D endless dirt bike game (Phase 1 prototype)",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test:e2e": "node tests/e2e.cjs",
+    "test:signatures": "node tests/signature-tour.cjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sworupplayz-cell/wukali-dirt.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/sworupplayz-cell/wukali-dirt/issues"
+  },
+  "homepage": "https://github.com/sworupplayz-cell/wukali-dirt#readme",
+  "dependencies": {
+    "three": "^0.170.0"
+  },
+  "devDependencies": {
+    "vite": "^5.4.21"
+  },
+  "type": "module"
+}
