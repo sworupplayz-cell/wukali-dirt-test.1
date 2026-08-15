@@ -3,6 +3,7 @@ import { ChunkGrid } from './streaming/ChunkGrid.js';
 import { TerrainField } from './TerrainField.js';
 import { TerrainTiles, CELL } from './TerrainTiles.js';
 import { FarTerrain } from './FarTerrain.js';
+import { Props } from './Props.js';
 
 /**
  * SectorWorld — Horizon Ride fixed-world streaming engine.
@@ -44,7 +45,10 @@ export class SectorWorld {
     this.tiles = new TerrainTiles(scene, this.field);
     // Phase 3: static continent backdrop so the ranges read from anywhere.
     this.far = new FarTerrain(scene, this.field);
-    this._colliders = []; // no props this phase
+    // Phase 3 rebalance: instanced exploration props, streamed with the
+    // logical sector window (7 draw calls total).
+    this.props = new Props(scene, this.field);
+    this._propsDirty = true;
     this._buildLighting(scene);
 
     // Logical 3x3 sector window (Phase 1B architecture, preserved).
@@ -53,11 +57,25 @@ export class SectorWorld {
     // for future gameplay streaming.
     this._grid = new ChunkGrid(SECTOR_SIZE, STREAM_RADIUS);
 
-    // Spawn ON a dirt trail near the world center, facing down the trail.
-    const sx = this.field.nsCenter(5, 2500); // NS trail #5 crosses mid-world
-    this._spawn = { x: sx, y: this.field.height(sx, 2500), z: 2500, yaw: 0 };
+    // Spawn ON a dirt trail near the world center, facing down the trail —
+    // deterministic scan for a FLAT stretch (the rebalanced massifs grew,
+    // so a fixed z could land on a foothill).
+    let sx = this.field.nsCenter(5, 2500), sz = 2500;
+    for (let dz = 0; dz <= 900; dz += 30) {
+      for (const s of dz === 0 ? [0] : [dz, -dz]) {
+        const z = 2500 + s;
+        const x = this.field.nsCenter(5, z);
+        const e = 8;
+        const slope = Math.hypot(
+          this.field.height(x + e, z) - this.field.height(x - e, z),
+          this.field.height(x, z + e) - this.field.height(x, z - e)
+        ) / (2 * e);
+        if (slope < 0.06) { sx = x; sz = z; dz = 1e9; break; }
+      }
+    }
+    this._spawn = { x: sx, y: this.field.height(sx, sz), z: sz, yaw: 0 };
 
-    this._surfScratch = { h: 0, trail: 0, moist: 0 };
+    this._surfScratch = { h: 0, trail: 0, moist: 0, mtn: 0, roadType: 0 };
 
     // Debug/HUD info (read by the F3 overlay + tests). Updated in update().
     this.debug = { sectorX: 0, sectorZ: 0, loaded: 0, tiles: 0 };
@@ -102,7 +120,7 @@ export class SectorWorld {
   }
 
   getColliders() {
-    return this._colliders;
+    return this.props.colliders;
   }
 
   /**
@@ -152,15 +170,36 @@ export class SectorWorld {
     return this.field.landforms.peakAt(x, z);
   }
 
+  /** Road under a point: { type, slope% } or null (F3). */
+  roadInfoAt(x, z) {
+    const t = this.field.sample(x, z, this._surfScratch).roadType;
+    if (!t) return null;
+    const names = { 1: 'MAIN', 2: 'PASS', 3: 'SPIRAL', 4: 'TRAIL' };
+    return { type: names[t] || '-', slope: (this.slopeAt(x, z) * 100).toFixed(0) };
+  }
+
+  /** Nearest scenic viewpoint (F3 + tests). */
+  nearestViewpoint(x, z) {
+    return this.field.landforms.nearestViewpoint(x, z);
+  }
+
   // ---- Streaming ------------------------------------------------------------
 
   /** Per-frame: sector window (logical) + terrain tile window (render). */
   update(pos) {
-    this._grid.update(
+    const moved = this._grid.update(
       pos.x, pos.z,
       (cx, cz) => this._sectorEnter(cx, cz),
-      () => {}
+      () => { this._propsDirty = true; }
     );
+    if (moved || this._propsDirty) {
+      this._propsDirty = false;
+      const ids = [];
+      for (const rec of this._grid.cells.values()) {
+        if (rec) ids.push([rec.cx, rec.cz]);
+      }
+      this.props.rebuild(ids);
+    }
     this.tiles.update(pos.x, pos.z);
 
     const s = this.sectorAt(pos.x, pos.z);
@@ -168,6 +207,7 @@ export class SectorWorld {
     this.debug.sectorZ = s.z;
     this.debug.loaded = this._countLoaded();
     this.debug.tiles = this.tiles.count();
+    this.debug.props = this.props.count;
   }
 
   _sectorEnter(cx, cz) {

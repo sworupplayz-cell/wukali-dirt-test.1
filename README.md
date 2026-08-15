@@ -2,19 +2,20 @@
 
 A lightweight, Android-first, 3D off-road dirt-bike game.
 
-**Current status: Phase 3 — Major landforms.** The fixed 10,000 m x 5,000 m
-world is now a believable continent: 18 unique named peaks connected into 4
-ridge chains (Crown Range, Mistral Wall, Southern Teeth, Grey Spur — highest:
-Rajadhara Summit ~4600 m), 14 saddles of which 12 carry switchback pass
-roads, 6 U-shaped glacial troughs + 8 V-shaped gorges, 6 basins (lowest
-~-100 m), 5 escarpments, and a 5-loop spiral road to the highest summit's
-rideable plateau. All roads are grade-clamped by construction (max ~29%,
-hairpins near-level) and laid by a contour-aware switchback walker at
-startup — deterministic, no meshes, pure analytic field. A static far-LOD
-continent backdrop (4 draw calls) makes the ranges visible for kilometres;
-altitude palette bands (grass -> scrub -> rock -> snow) are shared between
-near tiles and the backdrop. F3 shows elevation, slope %, and the peak
-name/ID + range while on a massif.
+**Current status: Phase 3 — Rideable world rebalance.** The continent was
+resculpted for motorcycle exploration: peaks cut ~40-45% (highest: Rajadhara
+Summit ~2650 m, average peaks 900-1800 m), wider flanks (max road grade 12
+deg, natural slopes mostly under 18 deg with valley walls decorative),
+basin pans dead-flat for future villages, eased gorges and escarpments.
+The road network is a real hierarchy now: 3 MAIN roads (8 m, <= 12% grade,
+long flowing curves — the Great East Road crosses the whole world), 12
+mountain PASS roads (4.5 m switchbacks + hairpins), the summit SPIRAL, and
+the lowland TRAIL network. 16 scenic viewpoints are computed ON the roads
+(every one reachable by riding) and marked with lookout platforms + prayer
+flags. Lightweight instanced exploration props (prayer flags, signposts,
+rock formations, lookouts, cabins, cave entrances, resting spots — 7 draw
+calls total) stream with the sector window. F3 adds road type, road slope
+and nearest viewpoint.
 
 ## Tech
 
@@ -52,9 +53,15 @@ Steering modes (Settings): buttons, virtual handlebar, tilt, swipe.
 World (Phase 3 landforms on the Phase 2 foundation + Phase 1B streaming):
 
 - `src/world/Landforms.js` — the authored continental skeleton: 4 ridge
-  chains of named peaks with saddles, U/V valleys, basins, escarpments,
-  the summit plateau, and all mountain roads (contour-aware switchback
-  walker + spiral, grade-clamped, spatial-hash blended into the field).
+  chains of named peaks with saddles, U/V valleys, flat-pan basins,
+  escarpments, the summit plateau, and the FULL road hierarchy (main
+  roads / pass switchbacks / spiral; grade-clamped by construction,
+  junction-pinned, spatial-hash blended with bed-dominance weighting so
+  junction handovers are seamless) plus road-computed scenic viewpoints.
+- `src/world/Props.js` — instanced exploration props (7 InstancedMeshes):
+  prayer flags, signposts, rocks, lookout platforms, cabins, caves,
+  resting spots; deterministic per-sector placement, streamed with the
+  sector window, solid props feed the bike's collider system.
 - `src/world/TerrainField.js` — the analytic ground truth: height, trail
   mask, moisture and mountain factor as pure deterministic functions of
   world (x, z). Composes the Phase 2 rolling lowlands with the Phase 3

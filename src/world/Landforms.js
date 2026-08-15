@@ -28,46 +28,50 @@ import { vnoise, sstep } from './noise.js';
 const S = 1214;
 
 // ---- Ridge chains: nodes = peaks [x, z, height, radius, name] -------------
+// Phase 3 rebalance: heights cut ~40-45% (highest 2640 m, average peaks
+// 900-1800 m), radii widened ~15-25% — flanks read as mountains but no
+// vertical walls; the upper-ridge band widened (UP_W 0.85 -> 1.0) so the
+// steepest section of every flank relaxed by another ~15%.
 const CHAINS = [
   {
     id: 'A', name: 'Crown Range',
     nodes: [
-      [600, 800, 1800, 550, 'Vandra Peak'],
-      [2100, 950, 2600, 700, 'Mount Sorren'],
-      [3600, 750, 3150, 800, 'Kalveri Spire'],
-      [5300, 1000, 2900, 750, 'Ashfell Crown'],
-      [7000, 1000, 4540, 1050, 'Rajadhara Summit'],
-      [8700, 1100, 3350, 850, 'Ghantir Horn'],
-      [9700, 900, 2200, 600, 'Eastwatch Peak'],
+      [600, 800, 1100, 620, 'Vandra Peak'],
+      [2100, 950, 1550, 800, 'Mount Sorren'],
+      [3600, 750, 1850, 900, 'Kalveri Spire'],
+      [5300, 1000, 1700, 850, 'Ashfell Crown'],
+      [7000, 1000, 2600, 1250, 'Rajadhara Summit'],
+      [8700, 1100, 1950, 950, 'Ghantir Horn'],
+      [9700, 900, 1300, 680, 'Eastwatch Peak'],
     ],
     dips: [0.34, 0.30, 0.36, 0.32, 0.30, 0.38],
   },
   {
     id: 'B', name: 'Mistral Wall',
     nodes: [
-      [1100, 1900, 2300, 650, 'Mistral Tor'],
-      [900, 2900, 2850, 750, 'Vel Morra'],
-      [1300, 3800, 2500, 650, 'Thornspire'],
-      [1900, 4500, 1900, 550, 'Lowen Knab'],
+      [1100, 1900, 1350, 740, 'Mistral Tor'],
+      [900, 2900, 1700, 850, 'Vel Morra'],
+      [1300, 3800, 1500, 740, 'Thornspire'],
+      [1900, 4500, 1150, 620, 'Lowen Knab'],
     ],
     dips: [0.35, 0.33, 0.37],
   },
   {
     id: 'C', name: 'Southern Teeth',
     nodes: [
-      [3800, 4400, 2100, 600, 'Serpent Dome'],
-      [5300, 4600, 2700, 700, 'Umberfang'],
-      [6900, 4300, 3050, 800, 'Dravok Peak'],
-      [8500, 4550, 2400, 650, 'Suntooth'],
+      [3800, 4400, 1250, 680, 'Serpent Dome'],
+      [5300, 4600, 1600, 800, 'Umberfang'],
+      [6900, 4300, 1800, 900, 'Dravok Peak'],
+      [8500, 4550, 1450, 740, 'Suntooth'],
     ],
     dips: [0.36, 0.32, 0.35],
   },
   {
     id: 'D', name: 'Grey Spur',
     nodes: [
-      [6100, 1900, 1400, 420, 'Fenn Ridge'],
-      [6900, 2300, 1700, 480, 'Harrow Knoll'],
-      [7700, 2700, 1300, 400, 'Grey Sentinel'],
+      [6100, 1900, 900, 480, 'Fenn Ridge'],
+      [6900, 2300, 1050, 550, 'Harrow Knoll'],
+      [7700, 2700, 850, 460, 'Grey Sentinel'],
     ],
     dips: [0.40, 0.42],
   },
@@ -75,48 +79,54 @@ const CHAINS = [
 
 const PED_W = 2.2;   // pedestal half-width = PED_W * radius
 const PED_F = 0.42;  // pedestal fraction of peak height
-const UP_W = 0.85;   // upper-ridge half-width factor
+const UP_W = 1.0;    // upper-ridge half-width factor (rebalance: was 0.85)
 const UP_F = 0.58;
 
 // Highest summit: flattened top + spiral road (chain A node 4).
-const SUMMIT = { cx: 7000, cz: 1000, top: 4590, plateauR: 150 };
-const SPIRAL = { r0: 800, r1: 110, w: 15, grade: 0.21 };
+const SUMMIT = { cx: 7000, cz: 1000, top: 2640, plateauR: 150 };
+const SPIRAL = { r0: 800, r1: 110, w: 15, grade: 0.185 };
 
 // ---- Valleys [type, pts(3), headE, mouthE, floorW] ------------------------
+// Rebalance: valley floors now sit in the 80-400 m band (was 20-340) and
+// floor widths grew — wide rideable corridors, not slots.
 const VALLEYS = [
-  ['U', [[2900, 1250], [3100, 1900], [3300, 2600]], 300, 30, 70],
-  ['U', [[5900, 1350], [5700, 2000], [5400, 2600]], 330, 25, 75],
-  ['U', [[1600, 2450], [2300, 2600], [3000, 2700]], 260, 20, 65],
-  ['U', [[7900, 1500], [8100, 2200], [8300, 2900]], 340, 30, 80],
-  ['U', [[4700, 4150], [4500, 3400], [4300, 2950]], 300, 25, 70],
-  ['U', [[7600, 4050], [7300, 3500], [7000, 3100]], 320, 30, 65],
-  ['V', [[1500, 1300], [2000, 1600], [2600, 1750]], 280, 40, 5],
-  ['V', [[4300, 1400], [4500, 1800], [4600, 2200]], 320, 35, 5],
-  ['V', [[9200, 1300], [9000, 1900], [8800, 2500]], 300, 45, 5],
-  ['V', [[1500, 4200], [2200, 4000], [2900, 3900]], 260, 30, 5],
-  ['V', [[6200, 4150], [6000, 3800], [5800, 3450]], 290, 40, 5],
-  ['V', [[9100, 4200], [9000, 3700], [8900, 3300]], 280, 35, 5],
-  ['V', [[700, 3300], [1600, 3200], [2400, 3100]], 320, 25, 5],
-  ['V', [[2600, 1050], [2700, 1500], [2800, 1950]], 300, 40, 5],
+  ['U', [[2900, 1250], [3100, 1900], [3300, 2600]], 340, 110, 85],
+  ['U', [[5900, 1350], [5700, 2000], [5400, 2600]], 360, 100, 90],
+  ['U', [[1600, 2450], [2300, 2600], [3000, 2700]], 300, 90, 80],
+  ['U', [[7900, 1500], [8100, 2200], [8300, 2900]], 380, 110, 95],
+  ['U', [[4700, 4150], [4500, 3400], [4300, 2950]], 340, 95, 85],
+  ['U', [[7600, 4050], [7300, 3500], [7000, 3100]], 360, 105, 80],
+  ['V', [[1500, 1300], [2000, 1600], [2600, 1750]], 320, 130, 12],
+  ['V', [[4300, 1400], [4500, 1800], [4600, 2200]], 360, 120, 12],
+  ['V', [[9200, 1300], [9000, 1900], [8800, 2500]], 340, 140, 12],
+  ['V', [[1500, 4200], [2200, 4000], [2900, 3900]], 300, 110, 12],
+  ['V', [[6200, 4150], [6000, 3800], [5800, 3450]], 330, 130, 12],
+  ['V', [[9100, 4200], [9000, 3700], [8900, 3300]], 320, 115, 12],
+  ['V', [[700, 3300], [1600, 3200], [2400, 3100]], 360, 95, 12],
+  ['V', [[2600, 1050], [2700, 1500], [2800, 1950]], 340, 130, 12],
 ];
 
 // ---- Basins [cx, cz, rx, rz, depth] ---------------------------------------
+// Rebalance: FLAT pans (inner 35% dead level, village-ready) with rims
+// kept under the 18 deg natural-slope cap (depth <~ 0.2 * min radius).
 const BASINS = [
-  [2500, 2200, 700, 450, -70],
-  [4800, 3300, 800, 500, -125], // lowest point of the world
-  [8600, 3300, 550, 400, -90],
-  [2900, 3600, 500, 380, -55],
-  [6300, 3100, 500, 350, -45],
-  [9500, 2300, 500, 400, -75],
+  [2500, 2200, 700, 450, -50],
+  [4800, 3300, 800, 500, -65], // lowest point of the world
+  [8600, 3300, 550, 400, -50],
+  [2900, 3600, 500, 380, -42],
+  [6300, 3100, 500, 350, -35],
+  [9500, 2300, 500, 400, -48],
 ];
 
 // ---- Escarpments [x1,z1, x2,z2, drop, rampW] ------------------------------
+// Rebalance: drops eased and ramps widened — every scarp face is now a
+// ~18 deg rideable drop-off, not a wall.
 const ESCARPMENTS = [
-  [3000, 3000, 4200, 3600, 45, 70],
-  [5900, 2900, 6800, 3300, 35, 60],
-  [1800, 1500, 2600, 1900, 40, 70],
-  [7600, 3700, 8400, 4000, 50, 80],
-  [2200, 3300, 2900, 3700, 30, 60],
+  [3000, 3000, 4200, 3600, 28, 130],
+  [5900, 2900, 6800, 3300, 22, 110],
+  [1800, 1500, 2600, 1900, 25, 130],
+  [7600, 3700, 8400, 4000, 30, 150],
+  [2200, 3300, 2900, 3700, 18, 110],
 ];
 
 // Passes: [chainIdx, gapIdx] — 12 of the 14 saddles carry roads.
@@ -130,13 +140,32 @@ const PASS_GAPS = [
   [3, 0], [3, 1],
 ];
 
-const ROAD_HALF = 7;      // full road-bed half width (m)
-const ROAD_FADE_MIN = 16; // apron reaches 0 here on flat ground...
-const ROAD_FADE_MAX = 110; // ...and widens with cut/fill depth (bench cuts)
+// Road hierarchy (Phase 3 rebalance). Widths are HALF-widths of the flat
+// bed; the blend apron is ~2.3x the half-width plus cut/fill widening.
+//   MAIN  — 8 m bed, grade <= 9%  (5.1 deg): long flowing valley roads
+//   PASS  — 4.5 m bed, grade <= 20% (11.3 deg): switchbacks & hairpins
+//   TRAIL — 2.6 m bed (analytic NS/EW network in TerrainField)
+const W_MAIN = 4.0;
+const W_PASS = 2.25;
+const W_SPIRAL = 2.5;
+const MAIN_GRADE = 0.11; // 6.3 deg — gentle, but able to follow basin rims
+const ROAD_FADE_MAX = 110; // apron cap (deep bench cuts)
 const PASS_WAVE = 340;    // switchback wavelength along the pass axis (m)
-const PASS_GRADE = 0.20;  // max climbing grade of any road, by construction
+const PASS_GRADE = 0.175; // max pass grade (~10 deg; surface stays < 12 deg)
 const RD_STEP = 16;       // road polyline vertex spacing (m of arc)
 const RD_CELL = 128;      // spatial-hash cell size (m)
+
+// Main roads: long flowing routes along the valley corridors, connecting
+// the basin pans (future village sites) and valley mouths.
+const MAIN_ROUTES = [
+  { name: 'Great East Road', pts: [
+    [2450, 2050], [3600, 2750], [4800, 3300], [5600, 3200],
+    [6300, 3100], [7400, 3200], [8600, 3300], [9200, 2800], [9650, 2300]] },
+  { name: 'Kalveri Valley Road', pts: [
+    [4800, 3300], [4600, 2600], [4500, 2200], [4420, 1750], [4450, 1420]] },
+  { name: 'Eastern Vale Road', pts: [
+    [8600, 3300], [8300, 2900], [8100, 2200], [7950, 1600]] },
+];
 
 const q4 = (t) => (t >= 1 ? 0 : (1 - t * t) * (1 - t * t));
 const smin = (a, b, k) => {
@@ -159,6 +188,7 @@ export class Landforms {
     this.passes = [];   // filled by initRoads()
     this.spiral = null; // filled by initRoads()
     this.roadKm = 0;
+    this.viewpoints = []; // filled by initViewpoints() after roads
   }
 
   stats() {
@@ -172,8 +202,54 @@ export class Landforms {
       basins: BASINS.length,
       escarpments: ESCARPMENTS.length,
       roadKm: +this.roadKm.toFixed(1),
+      mainKm: +((this._mainM || 0) / 1000).toFixed(1),
+      passKm: +((this._passM || 0) / 1000).toFixed(1),
+      mainRoads: this.mainRoads ? this.mainRoads.length : 0,
+      viewpoints: this.viewpoints.length,
       highest: SUMMIT.top + 6,
     };
+  }
+
+  /**
+   * Scenic viewpoints (Phase 3 rebalance): computed ON the road network
+   * after roads are laid — every viewpoint is reachable by riding. A road
+   * vertex qualifies when it looks out over ground that falls well below
+   * it nearby (an overlook), keeping only the best vertex per 700 m cell.
+   */
+  initViewpoints(raw) {
+    const best = new Map(); // cell -> {score, i}
+    for (let i = 0; i < this._rx.length; i += 4) {
+      const x = this._rx[i], z = this._rz[i], e = this._re[i];
+      if (x < 200 || x > 9800 || z < 200 || z > 4800) continue;
+      // Overlook score: how far the ground drops 90 m away (8 bearings).
+      let drop = 0;
+      for (let a = 0; a < 8; a++) {
+        const th = (a / 8) * Math.PI * 2;
+        const d = e - raw(x + Math.cos(th) * 90, z + Math.sin(th) * 90);
+        if (d > drop) drop = d;
+      }
+      if (drop < 25) continue;
+      const key = `${Math.floor(x / 700)},${Math.floor(z / 700)}`;
+      const cur = best.get(key);
+      if (!cur || drop > cur.score) best.set(key, { score: drop, i });
+    }
+    const arr = [...best.values()].sort((a, b) => b.score - a.score).slice(0, 16);
+    this.viewpoints = arr.map((v, n) => ({
+      id: `VP${String(n + 1).padStart(2, '0')}`,
+      x: this._rx[v.i], z: this._rz[v.i], e: this._re[v.i],
+      drop: +v.score.toFixed(0),
+      type: this._rt[v.i] === 1 ? 'main' : this._rt[v.i] === 3 ? 'spiral' : 'pass',
+    }));
+  }
+
+  /** Nearest viewpoint to (x,z) — debug overlay + prop placement. */
+  nearestViewpoint(x, z) {
+    let best = null, bd = Infinity;
+    for (const v of this.viewpoints) {
+      const d = Math.hypot(x - v.x, z - v.z);
+      if (d < bd) { bd = d; best = v; }
+    }
+    return best ? { ...best, dist: +bd.toFixed(0) } : null;
   }
 
   // ---- Mountains (chains) --------------------------------------------------
@@ -204,7 +280,9 @@ export class Landforms {
     }
     if (best <= 0) return 0;
     // Alpine ruggedness on the massif (roads/plateau override it later).
-    const rug = (vnoise(x * 0.0045, z * 0.0045, S + 61) - 0.5) * 150 * Math.min(1, best / 700);
+    // Rebalance: amplitude cut to match the lower peaks and longer
+    // wavelength — texture, never local walls (adds < 7 deg of slope).
+    const rug = (vnoise(x * 0.003, z * 0.003, S + 61) - 0.5) * 70 * Math.min(1, best / 450);
     return best + rug * (0.35 + 0.65 * up);
   }
 
@@ -217,14 +295,35 @@ export class Landforms {
     return h + (SUMMIT.top + 6 * m - h) * m;
   }
 
+  /**
+   * Basin bowls. Rebalance: the inner 45% of every basin is a DEAD-FLAT
+   * pan (future village ground); the rim ramps out smoothly.
+   */
   basins(x, z) {
     let h = 0;
     for (const [cx, cz, rx, rz, depth] of BASINS) {
       const dx = (x - cx) / rx, dz = (z - cz) / rz;
       const p2 = dx * dx + dz * dz;
-      if (p2 < 1) h += depth * q4(Math.sqrt(p2));
+      if (p2 < 1) {
+        const p = Math.sqrt(p2);
+        h += depth * (p < 0.35 ? 1 : q4((p - 0.35) / 0.65));
+      }
     }
     return h;
+  }
+
+  /** Flatten the terrain fabric inside basin pans (village-ready floors). */
+  basinFlat(x, z) {
+    let f = 0;
+    for (const [cx, cz, rx, rz] of BASINS) {
+      const dx = (x - cx) / rx, dz = (z - cz) / rz;
+      const p2 = dx * dx + dz * dz;
+      if (p2 < 1) {
+        const m = 1 - sstep(0.35, 0.6, Math.sqrt(p2));
+        if (m > f) f = m;
+      }
+    }
+    return f;
   }
 
   escarpments(x, z) {
@@ -262,9 +361,10 @@ export class Landforms {
       let prof;
       if (v.type === 'U') {
         const dw = Math.max(0, d - v.floorW);
-        prof = floorE + 0.0055 * dw * dw + Math.pow(d / 700, 8) * 5000;
+        prof = floorE + 0.004 * dw * dw + Math.pow(d / 700, 8) * 5000;
       } else {
-        prof = floorE + 0.42 * Math.max(0, d - v.floorW) + Math.pow(d / 420, 8) * 3500;
+        // Rebalance: V-gorge walls eased 0.42 -> 0.30 (23 deg -> 17 deg).
+        prof = floorE + 0.30 * Math.max(0, d - v.floorW) + Math.pow(d / 420, 8) * 3500;
       }
       if (prof < h + 16) {
         const carved = smin(h, prof, 16);
@@ -304,8 +404,24 @@ export class Landforms {
     this._rz = [];   // vertex z
     this._re = [];   // vertex elevation
     this._rid = [];  // road id per vertex (segments never span two roads)
+    this._rw = [];   // vertex half-width
+    this._rt = [];   // vertex road type: 1 main, 2 pass, 3 spiral
     this._hash = new Map();
+    this.mainRoads = [];
     let roadId = 0, totalM = 0;
+    let mainM = 0;
+
+    // ---- MAIN ROADS: flowing valley routes, grade-limited to 9%. -----------
+    // Curves come from a gentle deterministic S-wander added between the
+    // control points — long flowing arcs, never switchbacks.
+    for (const route of MAIN_ROUTES) {
+      const id = roadId++;
+      const lenM = this._layMainRoad(raw, route.pts, id);
+      this.mainRoads.push({ name: route.name, roadId: id, lengthM: lenM });
+      mainM += lenM;
+      totalM += lenM;
+    }
+    this._mainM = mainM;
 
     for (const [ci, gi] of PASS_GAPS) {
       const c = CHAINS[ci];
@@ -326,6 +442,7 @@ export class Landforms {
           ux * side, uz * side, vx, vz, roadId);
         roadId++;
       }
+      this._passM = (this._passM || 0) + lenM;
       this.passes.push({
         id: `${c.id}${gi}-${c.id}${gi + 1}`, name: `${a[4]} / ${b[4]} Pass`,
         sx, sz, elev: +saddleE.toFixed(0), lengthM: lenM, roadId: flankIds[0], flankIds,
@@ -344,14 +461,15 @@ export class Landforms {
     let th = 0;
     while (th <= TH) {
       const p = this.spiralPoint(th);
-      this._pushVertex(p.x, p.z, p.h, roadId);
+      this._pushVertex(p.x, p.z, p.h, roadId, W_SPIRAL, 3);
       const r = r0 + ((r1 - r0) * th) / TH;
       th += RD_STEP / r;
     }
     const top = this.spiralPoint(TH);
-    this._pushVertex(top.x, top.z, Et, roadId);
-    this._pushVertex(cx, cz, SUMMIT.top + 6, roadId); // onto the plateau
+    this._pushVertex(top.x, top.z, Et, roadId, W_SPIRAL, 3);
+    this._pushVertex(cx, cz, SUMMIT.top + 6, roadId, W_SPIRAL, 3); // plateau
     totalM += sTot + Math.hypot(top.x - cx, top.z - cz);
+    this._passM += sTot;
     roadId++;
 
     // U-valley floor trails (carved by the valleys themselves).
@@ -362,6 +480,68 @@ export class Landforms {
       }
     }
     this.roadKm = totalM / 1000;
+  }
+
+  /**
+   * Lay a MAIN ROAD along a polyline of control points: catmull-like
+   * smoothing via a gentle sine wander (long flowing curves), elevation
+   * follows the terrain but grade-clamped to MAIN_GRADE with a smoothing
+   * pass, so the road always feels fast and easy. Returns metres.
+   */
+  _layMainRoad(raw, pts, roadId) {
+    // Resample the polyline at RD_STEP with a lateral S-wander.
+    const X = [], Z = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i + 1];
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      const ux = (b[0] - a[0]) / L, uz = (b[1] - a[1]) / L;
+      const px = -uz, pz = ux;
+      const n = Math.max(1, Math.round(L / RD_STEP));
+      for (let k = (i === 0 ? 0 : 1); k <= n; k++) {
+        const t = k / n;
+        // Smooth blend between segments + flowing lateral wander.
+        const wob = Math.sin((i + t) * 2.4 + roadId) * 26 +
+                    Math.sin((i + t) * 5.9 + roadId * 2.7) * 11;
+        // Taper the wander near control points so junctions stay put.
+        const tp = Math.sin(Math.PI * t);
+        X.push(a[0] + (b[0] - a[0]) * t + px * wob * tp);
+        Z.push(a[1] + (b[1] - a[1]) * t + pz * wob * tp);
+      }
+    }
+    // Elevation: terrain-following, then grade-clamp forward+backward
+    // (two directions => no downstream cliff), then box-smooth.
+    const E = new Float64Array(X.length);
+    for (let i = 0; i < X.length; i++) E[i] = raw(X[i], Z[i]);
+    // Junction continuity: if either endpoint sits on an ALREADY-LAID
+    // road, pin its elevation to that road — branches leave the trunk at
+    // the trunk's height, never on a step.
+    const eStart = this._roadElevNear(X[0], Z[0]);
+    if (eStart !== null) E[0] = eStart;
+    const eEnd = this._roadElevNear(X[X.length - 1], Z[X.length - 1]);
+    if (eEnd !== null) E[E.length - 1] = eEnd;
+    for (let i = 1; i < E.length; i++) {
+      const ds = Math.hypot(X[i] - X[i - 1], Z[i] - Z[i - 1]);
+      E[i] = Math.max(E[i - 1] - MAIN_GRADE * ds, Math.min(E[i - 1] + MAIN_GRADE * ds, E[i]));
+    }
+    for (let i = E.length - 2; i >= 0; i--) {
+      const ds = Math.hypot(X[i + 1] - X[i], Z[i + 1] - Z[i]);
+      E[i] = Math.max(E[i + 1] - MAIN_GRADE * ds, Math.min(E[i + 1] + MAIN_GRADE * ds, E[i]));
+    }
+    for (let p = 0; p < 2; p++) {
+      for (let i = 1; i < E.length - 1; i++) E[i] = (E[i - 1] + 2 * E[i] + E[i + 1]) / 4;
+    }
+    // Re-pin junction endpoints after smoothing (smoothing can drift them).
+    if (eStart !== null) { E[0] = eStart; E[1] = (E[0] + E[2]) / 2; }
+    if (eEnd !== null) {
+      E[E.length - 1] = eEnd;
+      E[E.length - 2] = (E[E.length - 1] + E[E.length - 3]) / 2;
+    }
+    let len = 0;
+    for (let i = 0; i < X.length; i++) {
+      this._pushVertex(X[i], Z[i], E[i], roadId, W_MAIN, 1);
+      if (i > 0) len += Math.hypot(X[i] - X[i - 1], Z[i] - Z[i - 1]);
+    }
+    return len;
   }
 
   /**
@@ -419,11 +599,17 @@ export class Landforms {
         const dpx = nx2 - this._rx[i2], dpz = nz2 - this._rz[i2];
         const dp = Math.hypot(dpx, dpz);
         if (dp < 60) {
-          const lim = Math.max(1.5, 0.3 * dp);
+          const lim = Math.max(1.0, 0.19 * dp);
           const ei = this._re[i2];
           eN = Math.max(ei - lim, Math.min(ei + lim, eN));
         }
       }
+      // The elbow clamp must never break the ROAD grade cap itself —
+      // re-clamp about the previous vertex. Hairpins stay gentler (the
+      // chord between vertices shortens in the curve, so the same step
+      // reads as a steeper riding grade there).
+      const gCap = Math.max(0.10, PASS_GRADE * (0.3 + 0.7 * turn)) * RD_STEP;
+      eN = Math.max(e - gCap, Math.min(e + gCap, eN));
       // Stop BEFORE the step if it would cross another road (or this
       // road's own distant past) at a conflicting elevation — same-level
       // meetings become natural junctions and are kept.
@@ -445,21 +631,32 @@ export class Landforms {
       if (x < 60 || x > 9940 || z < 60 || z > 4940) break;
     }
     // Landing taper: wherever the walk stopped, ease the road elevation
-    // into the terrain over extra steps (grade-capped at 28%) so a road
-    // tip never leaves a step/cliff in the surface.
+    // into the terrain over extra steps so a road tip never leaves a
+    // step/cliff in the surface. Same embankment rule as the main walk:
+    // if the ground keeps falling away, stop instead of building a wall.
     for (let i = 0; i < 60; i++) {
       const eT0 = raw(x, z);
       if (Math.abs(e - eT0) < 1) break;
       const nx2 = x + hx * RD_STEP, nz2 = z + hz * RD_STEP;
       if (nx2 < 40 || nx2 > 9960 || nz2 < 40 || nz2 > 4960) break;
       const eT = raw(nx2, nz2);
-      const eN = Math.max(e - 0.28 * RD_STEP, Math.min(e + 0.28 * RD_STEP, eT));
+      const eN = Math.max(e - PASS_GRADE * RD_STEP, Math.min(e + PASS_GRADE * RD_STEP, eT));
+      if (eN - eT > 26) break;
       if (this._conflict(nx2, nz2, eN, roadId)) break;
       x = nx2; z = nz2; e = eN;
       this._pushVertex(x, z, e, roadId);
       len += RD_STEP;
     }
-    return len;
+    // Trim any trailing vertices still hanging far above the ground —
+    // a hanging tip would read as a huge earthwork wall in the blend.
+    let last = this._rx.length - 1;
+    while (last >= 0 && this._rid[last] === roadId &&
+           this._re[last] - raw(this._rx[last], this._rz[last]) > 22) {
+      this._popVertex();
+      last--;
+      len -= RD_STEP;
+    }
+    return Math.max(0, len);
   }
 
   /**
@@ -499,13 +696,67 @@ export class Landforms {
     return false;
   }
 
-  _pushVertex(x, z, e, roadId) {
+  /** Distance to the nearest mountain-road vertex (Infinity if none near).
+   *  Used by prop placement to keep solid obstacles off the road beds. */
+  roadDist(x, z) {
+    const cx = Math.floor(x / RD_CELL), cz = Math.floor(z / RD_CELL);
+    let best = Infinity;
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const arr = this._hash.get(`${cx + dx},${cz + dz}`);
+        if (!arr) continue;
+        for (let k = 0; k < arr.length; k++) {
+          const i = arr[k];
+          const ddx = x - this._rx[i], ddz = z - this._rz[i];
+          const d2 = ddx * ddx + ddz * ddz;
+          if (d2 < best) best = d2;
+        }
+      }
+    }
+    return Math.sqrt(best);
+  }
+
+  /** Interpolated elevation of the nearest already-laid road SEGMENT
+   *  within 60 m (junction pinning — branches leave trunks seamlessly). */
+  _roadElevNear(x, z) {
+    let best = null, bd2 = 60 * 60;
+    for (let i = 0; i < this._rx.length - 1; i++) {
+      if (this._rid[i + 1] !== this._rid[i]) continue;
+      const ax = this._rx[i], az = this._rz[i];
+      const abx = this._rx[i + 1] - ax, abz = this._rz[i + 1] - az;
+      const l2 = abx * abx + abz * abz;
+      let t = l2 > 0 ? ((x - ax) * abx + (z - az) * abz) / l2 : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const dx = x - (ax + abx * t), dz = z - (az + abz * t);
+      const d2 = dx * dx + dz * dz;
+      if (d2 < bd2) { bd2 = d2; best = this._re[i] + (this._re[i + 1] - this._re[i]) * t; }
+    }
+    return best;
+  }
+
+  _pushVertex(x, z, e, roadId, halfW = W_PASS, type = 2) {
     const idx = this._rx.length;
     this._rx.push(x); this._rz.push(z); this._re.push(e); this._rid.push(roadId);
+    this._rw.push(halfW); this._rt.push(type);
     const key = `${Math.floor(x / RD_CELL)},${Math.floor(z / RD_CELL)}`;
     let arr = this._hash.get(key);
     if (!arr) this._hash.set(key, (arr = []));
     arr.push(idx);
+  }
+
+  /** Remove the most recent vertex (walker tip trimming). */
+  _popVertex() {
+    const idx = this._rx.length - 1;
+    if (idx < 0) return;
+    const x = this._rx[idx], z = this._rz[idx];
+    const key = `${Math.floor(x / RD_CELL)},${Math.floor(z / RD_CELL)}`;
+    const arr = this._hash.get(key);
+    if (arr) {
+      const k = arr.lastIndexOf(idx);
+      if (k >= 0) arr.splice(k, 1);
+    }
+    this._rx.pop(); this._rz.pop(); this._re.pop();
+    this._rid.pop(); this._rw.pop(); this._rt.pop();
   }
 
   /**
@@ -519,7 +770,7 @@ export class Landforms {
    */
   roads(x, z, h, L) {
     const cx = Math.floor(x / RD_CELL), cz = Math.floor(z / RD_CELL);
-    let wSum = 0, weSum = 0, dMin2 = Infinity, nearE = 0;
+    let wSum = 0, weSum = 0, dMin2 = Infinity, nearE = 0, nearW = W_PASS, nearT = 0;
     for (let dz = -1; dz <= 1; dz++) {
       for (let dx = -1; dx <= 1; dx++) {
         const arr = this._hash.get(`${cx + dx},${cz + dz}`);
@@ -537,28 +788,33 @@ export class Landforms {
           const d2 = px * px + pz * pz;
           if (d2 > ROAD_FADE_MAX * ROAD_FADE_MAX) continue;
           const E = this._re[i] + (this._re[j] - this._re[i]) * t;
+          const hw = this._rw[i];
           const d = Math.sqrt(d2);
-          const fade = Math.min(ROAD_FADE_MAX, ROAD_FADE_MIN + Math.abs(E - h) * 1.9);
+          // Apron widens 3.2x the cut/fill depth: embankment and bench
+          // faces stay under ~32% (18 deg) — always rideable, never walls.
+          const fade = Math.min(ROAD_FADE_MAX, hw * 2.3 + Math.abs(E - h) * 3.2);
           if (d >= fade) continue;
           let w = 1 - sstep(0, fade, d);
           w *= w;
+          // Bed dominance — CONTINUOUS replacement for nearest-snap: a
+          // segment whose bed you are ON outweighs distant neighbors
+          // ~30x, so the bed follows its own centerline, yet junction
+          // handovers stay smooth (no Voronoi step between two roads).
+          const bd = 1 - sstep(0, hw * 1.6, d);
+          w *= 1 + 30 * bd * bd;
           wSum += w; weSum += w * E;
-          if (d2 < dMin2) { dMin2 = d2; nearE = E; }
+          if (d2 < dMin2) { dMin2 = d2; nearE = E; nearW = hw; nearT = this._rt[i]; }
         }
       }
     }
     if (wSum <= 0) return h;
     const dMin = Math.sqrt(dMin2);
-    // ON the bed the road must follow ITS OWN centerline elevation (the
-    // weighted average would let a neighboring switchback leg bend it);
-    // outside the bed the weighted average keeps everything continuous.
-    const bedSnap = 1 - sstep(ROAD_HALF * 0.9, ROAD_FADE_MIN, dMin);
-    const roadE = (weSum / wSum) * (1 - bedSnap) + nearE * bedSnap;
-    const mask = 1 - sstep(ROAD_HALF, ROAD_FADE_MIN, dMin);
+    const roadE = weSum / wSum;
+    const mask = 1 - sstep(nearW, nearW * 2.3, dMin);
     const blend = Math.max(mask, Math.min(0.92, wSum));
     h += (roadE - h) * blend;
-    const bed = 1 - sstep(ROAD_HALF * 0.8, ROAD_HALF * 1.9, dMin);
-    if (bed > L.road) L.road = bed;
+    const bed = 1 - sstep(nearW * 0.8, nearW * 1.9, dMin);
+    if (bed > L.road) { L.road = bed; L.roadType = nearT; }
     return h;
   }
 

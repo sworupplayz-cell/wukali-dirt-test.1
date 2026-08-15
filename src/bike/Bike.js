@@ -171,7 +171,9 @@ export class Bike {
     if (!Number.isFinite(this.position.y)) this.reset();
 
     // Out of the test area: snap back to safety (Phase 2 world removes this).
-    if (!world.isInBounds(this.position.x, this.position.z) || this.position.y < -30) {
+    // Void failsafe: the deepest legitimate terrain is the -90 m basin
+    // pans, so anything below -150 m is a fall through the world.
+    if (!world.isInBounds(this.position.x, this.position.z) || this.position.y < -150) {
       this.reset();
     }
   }

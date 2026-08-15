@@ -44,11 +44,13 @@ const MTN_TRAIL_CUT0 = 60, MTN_TRAIL_CUT1 = 220; // lowland trails fade out
 
 export class TerrainField {
   constructor() {
-    this._info = { h: 0, trail: 0, moist: 0, mtn: 0 };
-    this._lf = { road: 0, vroad: 0 };
+    this._info = { h: 0, trail: 0, moist: 0, mtn: 0, roadType: 0 };
+    this._lf = { road: 0, vroad: 0, roadType: 0 };
     this.landforms = new Landforms();
-    // Cache pass/spiral road elevations from the ROAD-FREE field once.
+    // Cache road centerlines from the ROAD-FREE field once, then find
+    // the scenic overlooks along the finished network.
     this.landforms.initRoads((x, z) => this._rawHeight(x, z));
+    this.landforms.initViewpoints((x, z) => this._rawHeight(x, z));
   }
 
   /** Physics height — the single source of truth. */
@@ -62,18 +64,20 @@ export class TerrainField {
    */
   sample(x, z, out) {
     const L = this._lf;
-    L.road = 0; L.vroad = 0;
+    L.road = 0; L.vroad = 0; L.roadType = 0;
 
     // ---- Phase 2 rolling base ----------------------------------------------
-    const plains = (fbm2(x * 0.00091, z * 0.00091, SEED) - 0.5) * 32;
-    const hills = (vnoise(x * 0.0033 + 13.7, z * 0.0033 - 7.1, SEED + 5) - 0.5) * 14;
+    // Rebalance: basin pans flatten the rolling fabric (village-ready).
+    const flat = 1 - this.landforms.basinFlat(x, z);
+    const plains = (fbm2(x * 0.00091, z * 0.00091, SEED) - 0.5) * 32 * flat;
+    const hills = (vnoise(x * 0.0033 + 13.7, z * 0.0033 - 7.1, SEED + 5) - 0.5) * 14 * flat;
     const region = vnoise(x * 0.00058 + 91.2, z * 0.00058 + 40.6, SEED + 9);
     let ridge = 0;
     const rm = sstep(0.56, 0.78, region);
     if (rm > 0) {
       const rv = vnoise(x * 0.0018 + 55.1, z * 0.0018 - 21.9, SEED + 13);
       const crest = 1 - Math.abs(2 * rv - 1);
-      ridge = crest * crest * 8 * rm;
+      ridge = crest * crest * 8 * rm * flat;
     }
 
     // ---- Phase 3 major landforms ---------------------------------------------
@@ -85,7 +89,7 @@ export class TerrainField {
     if (mtnN < 1) {
       trail = this._trailMask(x, z) * (1 - mtnN);
       bumps = (vnoise(x * 0.034 + 3.3, z * 0.034 - 9.9, SEED + 21) - 0.5) *
-        1.1 * (1 - 0.85 * trail) * (1 - 0.7 * mtnN);
+        1.1 * (1 - 0.85 * trail) * (1 - 0.7 * mtnN) * (0.35 + 0.65 * flat);
       jump = this._jumpAt(x, z) * (1 - mtnN);
     }
 
@@ -104,25 +108,28 @@ export class TerrainField {
     out.trail = trail;
     out.moist = vnoise(x * 0.0024 + 71.3, z * 0.0024 + 17.9, SEED + 33);
     out.mtn = mtnN;
+    // Road type under this point: 1 main / 2 pass / 3 spiral / 4 trail.
+    out.roadType = L.road > 0.15 ? L.roadType : (trail > 0.5 && mtnN < 0.5 ? 4 : 0);
     return out;
   }
 
   /** Road-free height used ONCE at startup to lay road centerlines. */
   _rawHeight(x, z) {
-    const plains = (fbm2(x * 0.00091, z * 0.00091, SEED) - 0.5) * 32;
-    const hills = (vnoise(x * 0.0033 + 13.7, z * 0.0033 - 7.1, SEED + 5) - 0.5) * 14;
+    const flat = 1 - this.landforms.basinFlat(x, z);
+    const plains = (fbm2(x * 0.00091, z * 0.00091, SEED) - 0.5) * 32 * flat;
+    const hills = (vnoise(x * 0.0033 + 13.7, z * 0.0033 - 7.1, SEED + 5) - 0.5) * 14 * flat;
     const region = vnoise(x * 0.00058 + 91.2, z * 0.00058 + 40.6, SEED + 9);
     let ridge = 0;
     const rm = sstep(0.56, 0.78, region);
     if (rm > 0) {
       const rv = vnoise(x * 0.0018 + 55.1, z * 0.0018 - 21.9, SEED + 13);
       const crest = 1 - Math.abs(2 * rv - 1);
-      ridge = crest * crest * 8 * rm;
+      ridge = crest * crest * 8 * rm * flat;
     }
     let h = plains + hills + ridge + this.landforms.mountains(x, z);
     h += this.landforms.basins(x, z);
     h += this.landforms.escarpments(x, z);
-    const L = { road: 0, vroad: 0 };
+    const L = { road: 0, vroad: 0, roadType: 0 };
     h = this.landforms.carveValleys(x, z, h, L);
     return this.landforms.plateau(x, z, h);
   }
