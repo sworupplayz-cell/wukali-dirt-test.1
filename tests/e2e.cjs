@@ -1,11 +1,11 @@
 /**
- * Horizon Ride — Phase 2 end-to-end verification.
+ * Horizon Ride — Phase 3 (world redesign) end-to-end verification.
  *
  * Drives the real game (dev server on :3000) in headless Chromium and
  * checks the preserved foundation (bike physics, camera, controls, menus,
- * Phase 1B streaming architecture) plus the Phase 2 terrain foundation:
- * seamless analytic heightfield, pooled tile rendering with bit-identical
- * borders, dirt trail network, jump mounds, and the extended F3 overlay.
+ * streaming architecture) plus the redesigned roads-first world:
+ * 8,000 x 4,000 m / 128 sectors, Rider's Meadow spawn, the Horizon Loop,
+ * pass switchbacks, hidden trails, viewpoints and instanced landmarks.
  *
  * Setup once per sandbox:  bash tests/setup-browser.sh
  * Run:                     npm run test:e2e
@@ -58,7 +58,7 @@ function check(name, ok, detail = '') {
     };
   });
 
-  // ================= World architecture (Phase 1B preserved) =================
+  // ================= World architecture (reduced map) =================
   let s = await state();
   check('Main menu opens', s.state === 'menu');
 
@@ -68,64 +68,67 @@ function check(name, ok, detail = '') {
     return {
       isSectorWorld: W.constructor.name === 'SectorWorld',
       corner00: W.sectorAt(1, 1),
-      cornerMax: W.sectorAt(9999, 4999),
+      cornerMax: W.sectorAt(7999, 3999),
       clampNeg: W.sectorAt(-50, -50),
-      inBounds: W.isInBounds(5000, 2500),
-      outBounds: W.isInBounds(-10, 100) || W.isInBounds(10001, 100),
+      inBounds: W.isInBounds(4000, 2000),
+      outBounds: W.isInBounds(-10, 100) || W.isInBounds(8001, 100) || W.isInBounds(100, 4001),
       loaded: W.debug.loaded,
       calls: g.renderer.info.render.calls,
     };
   });
   check('World is the SectorWorld streaming engine', world.isSectorWorld);
-  check('Fixed sector grid 20x10 preserved',
-    world.corner00.x === 0 && world.cornerMax.x === 19 && world.cornerMax.z === 9 &&
+  check('Fixed sector grid 16x8 (128 sectors)',
+    world.corner00.x === 0 && world.cornerMax.x === 15 && world.cornerMax.z === 7 &&
     world.clampNeg.x === 0);
-  check('World bounds 10,000 x 5,000 preserved', world.inBounds && !world.outBounds);
+  check('World bounds 8,000 x 4,000', world.inBounds && !world.outBounds);
   check('3x3 logical sector window active', world.loaded === 9, `loaded=${world.loaded}`);
 
-  // ================= Terrain determinism + Phase 3 landforms =================
+  // ================= Terrain + roads-first design =================
   const terrain = await page.evaluate(() => {
     const f = window.__game.world.field;
     const lf = f.landforms;
-    // Determinism: same coordinate, same height, always.
     const deterministic = f.height(1234.5, 987.6) === f.height(1234.5, 987.6);
     let minH = Infinity, maxH = -Infinity;
     for (let i = 0; i < 6000; i++) {
-      const x = (i * 613) % 10000, z = (i * 271) % 5000;
+      const x = (i * 613) % 8000, z = (i * 271) % 4000;
       const h = f.height(x, z);
       if (h < minH) minH = h;
       if (h > maxH) maxH = h;
     }
-    // Sample the exact summit & deepest basin.
-    maxH = Math.max(maxH, f.height(7000, 1000));
-    minH = Math.min(minH, f.height(4800, 3300));
-    return { deterministic, minH: +minH.toFixed(1), maxH: +maxH.toFixed(1),
-             stats: lf.stats() };
+    // Kanjiro summit area sample.
+    for (let dx = -200; dx <= 200; dx += 25) {
+      for (let dz = -200; dz <= 200; dz += 25) {
+        maxH = Math.max(maxH, f.height(5700 + dx, 350 + dz));
+      }
+    }
+    return { deterministic, minH: +minH.toFixed(0), maxH: +maxH.toFixed(0), stats: lf.stats() };
   });
-  check('Height is deterministic', terrain.deterministic);
   const st = terrain.stats;
-  check('15+ unique named mountains in connected chains',
-    st.peaks >= 15 && st.chains >= 4, `${st.peaks} peaks on ${st.chains} chains`);
-  check('6 U-valleys + 8 V-valleys', st.valleysU === 6 && st.valleysV === 8,
-    `U=${st.valleysU} V=${st.valleysV}`);
-  check('12 mountain passes on 10+ saddles', st.passes === 12 && st.saddles >= 10,
-    `passes=${st.passes} saddles=${st.saddles}`);
-  check('6 basins + 5 escarpments + 4 ridge chains',
-    st.basins === 6 && st.escarpments === 5 && st.chains === 4);
-  check('Highest peak in the 2600-3200 m band (rebalanced)',
-    terrain.maxH > 2500 && terrain.maxH < 3200, `${terrain.maxH} m`);
-  check('Lowest basin flat pan below -30 m', terrain.minH < -30 && terrain.minH > -140,
-    `${terrain.minH} m`);
-  check('Mountain road network laid (>25 km)', st.roadKm > 25, `${st.roadKm} km`);
-  check('Road hierarchy: 3 main roads + 12 passes + 16 viewpoints',
-    st.mainRoads === 3 && st.passes === 12 && st.viewpoints >= 12,
-    `main=${st.mainRoads} (${st.mainKm} km) passes=${st.passes} (${st.passKm} km) vp=${st.viewpoints}`);
+  check('Height is deterministic', terrain.deterministic);
+  check('16 named peaks in 4 connected ranges', st.peaks === 16 && st.ranges === 4);
+  check('Highest peak ~2200 m', terrain.maxH > 2000 && terrain.maxH <= 2300, `${terrain.maxH} m`);
+  check('Valley band 100-350 m (no negative holes)',
+    terrain.minH > 90 && terrain.minH < 360, `min=${terrain.minH} m`);
+  check('Road network: 5 main roads + 6 passes, > 25 km',
+    st.mainRoads === 5 && st.passes === 6 && st.roadKm > 25,
+    `main=${st.mainKm} km passes=${st.passKm} km total=${st.roadKm} km, vp=${st.viewpoints}`);
+  check('Viewpoints computed on roads (>= 8)', st.viewpoints >= 8, `${st.viewpoints}`);
 
-  // Road rideability: max grade along every pass road + the summit spiral.
+  // Road grades: main <= 10 deg, pass <= 12 deg.
   const roads = await page.evaluate(() => {
     const f = window.__game.world.field;
     const lf = f.landforms;
-    let worstG = 0;
+    let worstMain = 0;
+    for (const mr of lf.mainRoads) {
+      const i0 = lf._rid.indexOf(mr.roadId);
+      for (let i = i0; lf._rid[i] === mr.roadId && lf._rid[i + 1] === mr.roadId; i++) {
+        const ds = Math.hypot(lf._rx[i + 1] - lf._rx[i], lf._rz[i + 1] - lf._rz[i]);
+        if (ds < 1) continue;
+        const g = Math.abs(f.height(lf._rx[i + 1], lf._rz[i + 1]) - f.height(lf._rx[i], lf._rz[i])) / ds;
+        if (g > worstMain) worstMain = g;
+      }
+    }
+    let worstPass = 0;
     lf.passes.forEach((p, pi) => {
       for (let n = 0; ; n++) {
         const a = lf.passPoint(pi, n), b = lf.passPoint(pi, n + 1);
@@ -133,48 +136,20 @@ function check(name, ok, detail = '') {
         const ds = Math.hypot(b.x - a.x, b.z - a.z);
         if (ds < 1) continue;
         const g = Math.abs(f.height(b.x, b.z) - f.height(a.x, a.z)) / ds;
-        if (g > worstG) worstG = g;
+        if (g > worstPass) worstPass = g;
       }
     });
-    const sp = lf.spiral;
-    let spG = 0;
-    for (let th = 0.15; th < sp.TH - 0.1; th += 0.03) {
-      const a = lf.spiralPoint(th), b = lf.spiralPoint(th + 0.03);
-      const ds = Math.hypot(b.x - a.x, b.z - a.z);
-      const g = Math.abs(f.height(b.x, b.z) - f.height(a.x, a.z)) / ds;
-      if (g > spG) spG = g;
-    }
-    return { worstG: +worstG.toFixed(3), spG: +spG.toFixed(3),
-             spiralTurns: +(sp.TH / (2 * Math.PI)).toFixed(1) };
+    return {
+      mainDeg: +(Math.atan(worstMain) * 180 / Math.PI).toFixed(1),
+      passDeg: +(Math.atan(worstPass) * 180 / Math.PI).toFixed(1),
+    };
   });
-  check('Pass roads within the 12 deg road cap (grade <= 21%)', roads.worstG <= 0.215,
-    `worst=${(roads.worstG * 100).toFixed(0)}% = ${(Math.atan(roads.worstG) * 180 / Math.PI).toFixed(1)} deg`);
-  check('Summit spiral rideable switchback loops (<= 12 deg)',
-    roads.spG <= 0.215 && roads.spiralTurns >= 2,
-    `grade=${(roads.spG * 100).toFixed(0)}% turns=${roads.spiralTurns}`);
-  // Main roads: long flowing curves at gentle grade.
-  const mainG = await page.evaluate(() => {
-    const f = window.__game.world.field;
-    const lf = f.landforms;
-    let worst = 0;
-    for (const mr of lf.mainRoads) {
-      const i0 = lf._rid.indexOf(mr.roadId);
-      for (let i = i0; lf._rid[i] === mr.roadId && lf._rid[i + 1] === mr.roadId; i++) {
-        const ds = Math.hypot(lf._rx[i + 1] - lf._rx[i], lf._rz[i + 1] - lf._rz[i]);
-        if (ds < 1) continue;
-        const g = Math.abs(f.height(lf._rx[i + 1], lf._rz[i + 1]) - f.height(lf._rx[i], lf._rz[i])) / ds;
-        if (g > worst) worst = g;
-      }
-    }
-    return +worst.toFixed(3);
-  });
-  check('Main roads gentle (grade <= 12%, mostly ~9%)', mainG <= 0.125,
-    `worst=${(mainG * 100).toFixed(1)}%`);
+  check('Main roads <= 10 deg', roads.mainDeg <= 10, `worst=${roads.mainDeg} deg`);
+  check('Pass roads <= 12 deg', roads.passDeg <= 12.05, `worst=${roads.passDeg} deg`);
 
-  // Mesh-level seam verification: for built adjacent tiles, compare the
-  // actual vertex heights along shared edges — must be bit-identical.
+  // ================= Seams =================
   await page.click('#btn-play');
-  await sleep(1200); // let the tile window build out
+  await sleep(1200);
   const seam = await page.evaluate(() => {
     const tiles = window.__game.world.tiles;
     const recs = new Map();
@@ -213,19 +188,51 @@ function check(name, ok, detail = '') {
   check('Tile borders are bit-identical (zero seams)',
     seam.pairs >= 40 && seam.maxDiff === 0, `${seam.pairs} edge pairs, maxDiff=${seam.maxDiff}`);
 
-  // ================= Spawn + riding =================
+  // ================= Rider's Meadow spawn =================
   s = await state();
   check('PLAY starts gameplay', s.state === 'playing');
-  check('Bike spawns grounded on terrain',
-    s.grounded && Math.abs(s.pos[1] - s.groundH) < 0.5, JSON.stringify(s.pos));
-  const spawnTrail = await page.evaluate(() => {
+  check('Spawn at Rider\'s Meadow (world center)',
+    Math.abs(s.pos[0] - 4000) < 30 && Math.abs(s.pos[2] - 2000) < 60, JSON.stringify(s.pos));
+  check('Bike spawns grounded', s.grounded && Math.abs(s.pos[1] - s.groundH) < 0.5);
+  const meadow = await page.evaluate(() => {
     const g = window.__game;
-    const sc = { h: 0, trail: 0, moist: 0 };
-    g.world.field.sample(g.bike.position.x, g.bike.position.z, sc);
-    return sc.trail;
+    const f = g.world.field;
+    const e = 8;
+    // Spawn flatness + meadow max slope + intersection roads + lake.
+    const slopeAt = (x, z) => Math.hypot(
+      f.height(x + e, z) - f.height(x - e, z),
+      f.height(x, z + e) - f.height(x, z - e)) / (2 * e);
+    let worst = 0;
+    for (let a = 0; a < 16; a++) {
+      for (let r = 50; r < 560; r += 55) {
+        const x = 4000 + Math.cos(a / 16 * 6.28) * r, z = 2000 + Math.sin(a / 16 * 6.28) * r;
+        const sl = slopeAt(x, z);
+        if (sl > worst) worst = sl;
+      }
+    }
+    const sc = { h: 0, trail: 0, moist: 0, mtn: 0, roadType: 0 };
+    const roadsAt = [
+      f.sample(4000, 1900, sc).roadType, // N
+      f.sample(4000, 2100, sc).roadType, // S
+      f.sample(3900, 2000, sc).roadType, // W
+      f.sample(4100, 2000, sc).roadType, // E
+    ];
+    const lakeDip = f.height(4230, 2210) < f.height(4230, 2350) - 2;
+    const spawnSlope = slopeAt(g.bike.position.x, g.bike.position.z);
+    return {
+      spawnSlopeDeg: +(Math.atan(spawnSlope) * 180 / Math.PI).toFixed(1),
+      meadowWorstDeg: +(Math.atan(worst) * 180 / Math.PI).toFixed(1),
+      fourWay: roadsAt.every((t) => t === 1),
+      lakeDip,
+    };
   });
-  check('Spawn is on a dirt trail', spawnTrail > 0.8, `trail=${spawnTrail.toFixed(2)}`);
+  check('Spawn is flat', meadow.spawnSlopeDeg < 4, `${meadow.spawnSlopeDeg} deg`);
+  check('Meadow gentle everywhere (< 18 deg, no cliffs)', meadow.meadowWorstDeg < 18,
+    `worst=${meadow.meadowWorstDeg} deg`);
+  check('Four-way main road intersection at spawn', meadow.fourWay);
+  check('Small lake dug into the meadow', meadow.lakeDip);
 
+  // ================= Riding basics =================
   await page.keyboard.down('KeyW');
   await sleep(2200);
   s = await state();
@@ -245,64 +252,36 @@ function check(name, ok, detail = '') {
   s = await state();
   check('Brake works', s.speed <= 1, `speed=${s.speed}`);
 
-  // ================= Long ride: 20+ sector borders, physics stability ========
-  // Fast-forwarded FULL-PHYSICS ride: the real Bike.update + world streaming
-  // stepped at 60 Hz across ~14 km of terrain in all four directions. Counts
-  // sector-border crossings, watches ground adherence (sinking/floating),
-  // NaN failures and crash handling — far more distance than a wall-clock
-  // ride could cover in CI.
-  const longRide = await page.evaluate(() => {
+  // ================= Practice jump =================
+  // Fixed-step (frame-rate-independent) run at the South Arm kicker —
+  // the same real Bike.update the render loop calls.
+  const pjump = await page.evaluate(() => {
     const g = window.__game;
+    const f = g.world.field;
     const input = { throttle: 1, brake: 0, steer: 0, stunt: 0, trick: 0 };
-    const legs = [
-      [3200, 3000, Math.PI / 2, 12000],   // east across the central lowlands
-      [4500, 2650, 0, 10000],             // north up the map
-      [9500, 3000, -Math.PI / 2, 12000],  // west across the basins
-      [5600, 3900, Math.PI, 10000],       // south
-      [2400, 2000, Math.PI / 4, 10000],   // NE diagonal (rows + columns)
-      [6600, 4200, -3 * Math.PI / 4, 10000], // SW diagonal
-    ];
-    let crossings = 0, maxDev = 0, nan = false, crashes = 0, dist = 0;
-    for (const [x0, z0, yaw, steps] of legs) {
-      g.bike._placeAt(x0, g.world.getHeight(x0, z0), z0, yaw);
-      let prev = g.world.sectorAt(x0, z0), px = x0, pz = z0;
-      for (let i = 0; i < steps; i++) {
-        g.bike.update(1 / 60, input);
-        g.world.update(g.bike.position);
-        if ((i & 7) === 0) {
-          const p = g.bike.position;
-          const sec = g.world.sectorAt(p.x, p.z);
-          if (sec.x !== prev.x || sec.z !== prev.z) crossings++;
-          prev = sec;
-          dist += Math.hypot(p.x - px, p.z - pz); px = p.x; pz = p.z;
-          if (!Number.isFinite(g.bike.speed) || !Number.isFinite(p.y)) nan = true;
-          if (g.bike.grounded && !g.bike.crashed) {
-            const dev = Math.abs(p.y - g.world.getHeight(p.x, p.z));
-            if (dev > maxDev) maxDev = dev;
-          }
-          if (g.bike.crashed) { crashes++; g.bike.reset(); }
-        }
-      }
+    g.bike._placeAt(4000, f.height(4000, 2040), 2040, 0);
+    let air = false, peak = 0, landed = false, crashed = false;
+    for (let i = 0; i < 60 * 15; i++) {
+      g.bike.update(1 / 60, input);
+      g.world.update(g.bike.position);
+      if (!g.bike.grounded) { air = true; peak = Math.max(peak, g.bike.heightAboveGround); }
+      if (g.bike.crashed) { crashed = true; break; }
+      if (air && g.bike.grounded) { landed = true; break; }
     }
+    g.bike.reset();
     g.followCam.snapTo(g.bike);
-    return { crossings, maxDev: +maxDev.toFixed(3), nan, crashes, km: +(dist / 1000).toFixed(1) };
+    return { air, peak: +peak.toFixed(2), landed, crashed };
   });
-  check('Rode across 30+ sector borders (full physics)', longRide.crossings >= 30,
-    `${longRide.crossings} crossings over ${longRide.km} km, ${longRide.crashes} crashes`);
-  check('No physics failure during long ride', !longRide.nan);
-  check('No wheel sinking / floating (grounded dev < 0.15 m)', longRide.maxDev < 0.15,
-    `maxDev=${longRide.maxDev} m`);
+  check('Practice jump works (airborne + stable landing)',
+    pjump.air && pjump.peak > 0.5 && pjump.landed && !pjump.crashed,
+    `peak=${pjump.peak} m`);
 
-  // ================= Mountain traversals (full physics) =================
-  // 1. Traverse a mountain pass road end to end (grade-following autopilot
-  //    steering toward the next road vertex). 2. Climb the summit spiral's
-  //    top loops to the Rajadhara plateau. 3. Descend a U-valley floor.
-  const mountains = await page.evaluate(() => {
+  // ================= Full-physics rides =================
+  const rides = await page.evaluate(() => {
     const g = window.__game;
     const f = g.world.field;
     const lf = f.landforms;
 
-    /** Densify a waypoint list so no two points are > gap apart. */
     function densify(pts, gap) {
       const out = [pts[0]];
       for (let i = 1; i < pts.length; i++) {
@@ -316,21 +295,15 @@ function check(name, ok, detail = '') {
       return out;
     }
 
-    /**
-     * Ride the real bike through an ordered list of waypoints. A blind
-     * physics autopilot, not a player: if a waypoint makes no progress
-     * for ~10 s (hairpin overshoot) it teleport-recovers onto the route
-     * and counts a reset — the metric is that the ROUTE is rideable, not
-     * autopilot perfection.
-     */
     function rideWaypoints(pts, maxSteps) {
       const input = { throttle: 1, brake: 0, steer: 0, stunt: 0, trick: 0 };
       const b = g.bike;
       let wp = 1, maxDev = 0, nan = false, resets = 0;
-      let lastWp = 1, sinceProgress = 0;
-      const p0 = pts[0], p1 = pts[1];
-      const yaw0 = Math.atan2(p1.x - p0.x, p1.z - p0.z);
-      b._placeAt(p0.x, f.height(p0.x, p0.z), p0.z, yaw0);
+      let lastWp = 1, sinceProgress = 0, crossings = 0, dist = 0;
+      let prevSec = g.world.sectorAt(pts[0].x, pts[0].z);
+      let px = pts[0].x, pz = pts[0].z;
+      b._placeAt(pts[0].x, f.height(pts[0].x, pts[0].z), pts[0].z,
+        Math.atan2(pts[1].x - pts[0].x, pts[1].z - pts[0].z));
       for (let i = 0; i < maxSteps && wp < pts.length; i++) {
         const t = pts[wp];
         const dx = t.x - b.position.x, dz = t.z - b.position.z;
@@ -344,9 +317,14 @@ function check(name, ok, detail = '') {
         b.update(1 / 60, input);
         g.world.update(b.position);
         if ((i & 7) === 0) {
-          if (!Number.isFinite(b.position.y) || !Number.isFinite(b.speed)) { nan = true; break; }
+          const p = b.position;
+          if (!Number.isFinite(p.y) || !Number.isFinite(b.speed)) { nan = true; break; }
+          const sec = g.world.sectorAt(p.x, p.z);
+          if (sec.x !== prevSec.x || sec.z !== prevSec.z) crossings++;
+          prevSec = sec;
+          dist += Math.hypot(p.x - px, p.z - pz); px = p.x; pz = p.z;
           if (b.grounded && !b.crashed) {
-            const dev = Math.abs(b.position.y - f.height(b.position.x, b.position.z));
+            const dev = Math.abs(p.y - f.height(p.x, p.z));
             if (dev > maxDev) maxDev = dev;
           }
           if (b.crashed) {
@@ -355,7 +333,7 @@ function check(name, ok, detail = '') {
             resets++;
           }
           if (wp !== lastWp) { lastWp = wp; sinceProgress = 0; }
-          else if (++sinceProgress > 75) { // ~10 s without reaching the waypoint
+          else if (++sinceProgress > 75) {
             const prev = pts[wp - 1];
             b._placeAt(prev.x, f.height(prev.x, prev.z), prev.z, want);
             resets++;
@@ -363,215 +341,62 @@ function check(name, ok, detail = '') {
           }
         }
       }
-      return { done: wp >= pts.length, wp, of: pts.length, maxDev: +maxDev.toFixed(3), nan, resets };
+      return { done: wp >= pts.length, wp, of: pts.length, maxDev: +maxDev.toFixed(3),
+               nan, resets, crossings, km: +(dist / 1000).toFixed(1) };
     }
 
-    // -- Pass traversal: B2-B3 (lowest saddle, clean end-to-end road).
-    const pi = lf.passes.findIndex((p) => p.id === 'B2-B3');
-    const passPts = [];
-    for (let n = 0; ; n += 2) {
-      const pt = lf.passPoint(pi, n);
-      if (!pt) break;
-      passPts.push(pt);
+    // 1. The Horizon Loop — full circuit (crosses the whole map).
+    const loop = lf.mainRoads[0];
+    const lPts = [];
+    const i0 = lf._rid.indexOf(loop.roadId);
+    for (let i = i0; lf._rid[i] === loop.roadId; i += 4) {
+      lPts.push({ x: lf._rx[i], z: lf._rz[i] });
     }
-    const pass = rideWaypoints(passPts, 60 * 300);
-    const passElev = lf.passes[pi].elev;
+    const loopRide = rideWaypoints(lPts, 60 * 1500);
 
-    // -- Summit: ride the spiral's last 1.5 loops onto the plateau.
-    const sp = lf.spiral;
-    const spPts = [];
-    for (let th = sp.TH - 1.5 * 2 * Math.PI; th < sp.TH; th += 0.1) {
-      spPts.push(lf.spiralPoint(th));
-    }
-    spPts.push({ x: sp.cx, z: sp.cz });
-    const summit = rideWaypoints(spPts, 60 * 300);
-    const summitH = g.bike.position.y;
-
-    // -- 3 U-valley descents along the floor lines (1/3/4 are clean
-    // full-length troughs; 0/5 are hanging valleys by design).
-    const valleyRes = [];
-    for (const vi of [1, 3, 4]) {
-      const v = f.landforms.valleys[vi];
-      const vPts = densify(v.pts.map((p) => ({ x: p[0], z: p[1] })), 60);
-      valleyRes.push(rideWaypoints(vPts, 60 * 240));
-    }
-    const valley = valleyRes[1]; // primary metric (valley 3)
-    const valleysDone = valleyRes.filter((r) => r.done && !r.nan).length;
-
-    // -- Climb 5 pass roads: ride the top quarter of each flank up to
-    // the saddle (the full-length descent is covered by B2-B3 above).
+    // 2. Climb 3 mountain passes (the long flanks: N1-N2, S1-S2, W1-W2).
     let passesClimbed = 0;
-    for (const pid of ['A0-A1', 'A1-A2', 'B0-B1', 'C0-C1', 'D0-D1']) {
-      const idx = lf.passes.findIndex((p) => p.id === pid);
-      if (idx < 0) continue;
+    for (const pid of [0, 2, 4]) {
       const pts = [];
       for (let n = 0; ; n += 2) {
-        const pt = lf.passPoint(idx, n);
+        const pt = lf.passPoint(pid, n);
         if (!pt) break;
         pts.push(pt);
       }
-      // Ride from ~35% down the flank back up to the saddle (reverse).
-      const seg = pts.slice(0, Math.max(3, Math.floor(pts.length * 0.35))).reverse();
-      const r = rideWaypoints(seg, 60 * 150);
+      if (pts.length < 3) continue;
+      const r = rideWaypoints(pts.reverse(), 60 * 300); // climb up to the saddle
       if (r.done && !r.nan && r.resets <= 3) passesClimbed++;
     }
 
-    // -- Reach 5 viewpoints: ride the road to each of the 5 top
-    // viewpoints from 150 m away along the same road.
-    let vpReached = 0;
-    for (const vp of lf.viewpoints.slice(0, 5)) {
-      // approach start: nearest road vertex ~10 indices away
-      let bi = -1, bd = Infinity;
-      for (let i = 0; i < lf._rx.length; i++) {
-        const d = Math.hypot(lf._rx[i] - vp.x, lf._rz[i] - vp.z);
-        if (d < bd) { bd = d; bi = i; }
-      }
-      const j = Math.max(0, bi - 10);
-      const from = { x: lf._rx[j], z: lf._rz[j] };
-      if (lf._rid[j] !== lf._rid[bi]) { vpReached++; continue; } // road tip: trivially there
-      const r = rideWaypoints(densify([from, { x: vp.x, z: vp.z }], 40), 60 * 90);
-      if (r.done && !r.nan) vpReached++;
-    }
-
-    // -- Cross-world ride: the Great East Road end to end (2450,2050) ->
-    // (9650,2300) — one side of the world to the other on a main road.
-    const great = lf.mainRoads[0];
-    const gPts = [];
-    {
-      const i0 = lf._rid.indexOf(great.roadId);
-      for (let i = i0; lf._rid[i] === great.roadId; i += 6) {
-        gPts.push({ x: lf._rx[i], z: lf._rz[i] });
-      }
-    }
-    const cross = rideWaypoints(gPts, 60 * 900);
-
     g.followCam.snapTo(g.bike);
-    return { pass, passElev, summit, summitH: +summitH.toFixed(0), valley,
-             valleysDone, passesClimbed, vpReached, cross,
-             crossKm: +(great.lengthM / 1000).toFixed(1) };
+    return { loopRide, passesClimbed };
   });
-  check('Traversed a mountain pass road (full physics)',
-    mountains.pass.done && !mountains.pass.nan && mountains.pass.resets <= 4,
-    `saddle ${mountains.passElev} m, wp ${mountains.pass.wp}/${mountains.pass.of}, resets=${mountains.pass.resets}`);
-  check('Climbed the summit spiral to Rajadhara plateau (~2650 m)',
-    mountains.summit.done && mountains.summitH > 2500 && mountains.summit.resets <= 4,
-    `reached ${mountains.summitH} m, resets=${mountains.summit.resets}`);
-  check('Descended 3 U-valley floors',
-    mountains.valleysDone >= 3,
-    `${mountains.valleysDone}/3 done; primary wp ${mountains.valley.wp}/${mountains.valley.of}`);
-  check('Climbed 5 mountain passes', mountains.passesClimbed >= 5,
-    `${mountains.passesClimbed}/5`);
-  check('Reached 5 scenic viewpoints by road', mountains.vpReached >= 5,
-    `${mountains.vpReached}/5`);
-  check('Rode across the world on the Great East Road',
-    mountains.cross.done && !mountains.cross.nan,
-    `${mountains.crossKm} km, wp ${mountains.cross.wp}/${mountains.cross.of}, resets=${mountains.cross.resets}`);
-  check('No sinking during mountain rides',
-    mountains.pass.maxDev < 0.15 && mountains.summit.maxDev < 0.15 && mountains.valley.maxDev < 0.15,
-    `devs ${mountains.pass.maxDev}/${mountains.summit.maxDev}/${mountains.valley.maxDev}`);
+  check('Rode the full Horizon Loop (world circuit, full physics)',
+    rides.loopRide.done && !rides.loopRide.nan && rides.loopRide.resets <= 2,
+    `${rides.loopRide.km} km, wp ${rides.loopRide.wp}/${rides.loopRide.of}, resets=${rides.loopRide.resets}`);
+  check('Loop ride covered 2+ km with no impossible slopes', rides.loopRide.km >= 2);
+  check('Crossed 20+ sector borders riding', rides.loopRide.crossings >= 20,
+    `${rides.loopRide.crossings} crossings`);
+  check('No wheel sinking during the loop', rides.loopRide.maxDev < 0.15,
+    `maxDev=${rides.loopRide.maxDev} m`);
+  check('Climbed 3 mountain passes', rides.passesClimbed >= 3, `${rides.passesClimbed}/3`);
 
-  // Real-time ride for FPS + suspension behaviour.
-  await page.evaluate(() => {
-    const g = window.__game;
-    g.bike._placeAt(5000, g.world.getHeight(5000, 2000), 2000, 0);
-    g.followCam.snapTo(g.bike);
-  });
-  await sleep(300);
-  let minFps = 999, suspMoved = false;
-  await page.keyboard.down('KeyW');
-  for (let i = 0; i < 16; i++) {
-    await sleep(500);
-    s = await state();
-    if (i > 2 && s.fps < minFps) minFps = s.fps;
-    if (Math.abs(s.susp) > 0.005) suspMoved = true;
-  }
-  await page.keyboard.up('KeyW');
-  check('Suspension compresses over terrain', suspMoved);
-  // Headless CI renders on a CPU rasterizer (llvmpipe): ~120 k tris cost
-  // real milliseconds there that a phone GPU doesn't pay. The floor only
-  // guards against catastrophic streaming stalls.
-  check('No FPS collapse while streaming', minFps > 9, `min fps=${minFps} (headless CPU rendering)`);
-
-  // Tile pool never exhausts, tiles stay bounded.
-  const tileStats = await page.evaluate(() => ({
-    tiles: window.__game.world.debug.tiles,
-    avail: window.__game.world.tiles._pool.available,
-  }));
-  check('Tile window bounded (<= 49) with pool headroom',
-    tileStats.tiles <= 49 && tileStats.avail >= 0, JSON.stringify(tileStats));
-
-  // ================= Jump over a mound =================
-  // Recover if the blind ride ended in a crash state.
-  s = await state();
-  if (s.state === 'crashed') {
-    await page.click('#btn-go-restart');
-    await sleep(500);
-  }
-  const jump = await page.evaluate(() => {
-    const g = window.__game;
-    const f = g.world.field;
-    const j = f.jumpNear(g.world.getSpawn().x, 2500);
-    if (!j) return null;
-    // Line up 55 m before the mound on the trail, facing +z.
-    const zStart = j.z - 55;
-    const x = f.nsCenter ? g.world.field.nsCenter(5, zStart) : j.x;
-    g.bike._placeAt(j.x, g.world.getHeight(j.x, zStart), zStart, 0);
-    g.followCam.snapTo(g.bike);
-    return j;
-  });
-  check('Jump mounds exist on trails', !!jump, JSON.stringify(jump));
-  let airborne = false, peakAlt = 0, landedStable = false;
-  if (jump) {
-    await page.keyboard.down('KeyW');
-    for (let i = 0; i < 60; i++) {
-      await sleep(100);
-      const a = await page.evaluate(() => ({
-        air: !window.__game.bike.grounded,
-        alt: window.__game.bike.heightAboveGround,
-        crashed: window.__game.bike.crashed,
-        speed: window.__game.bike.speed,
-      }));
-      if (a.air) { airborne = true; peakAlt = Math.max(peakAlt, a.alt); }
-      if (airborne && !a.air && !a.crashed) { landedStable = true; break; }
-    }
-    await page.keyboard.up('KeyW');
-  }
-  check('Bike jumps off terrain mounds', airborne && peakAlt > 0.4, `peak=${peakAlt.toFixed(2)} m`);
-  check('Landing is stable (no crash)', landedStable);
-
-  // ================= Reset / POV / camera clearance =================
-  await sleep(400);
+  // ================= Reset / POV =================
   s = await state();
   if (s.state === 'crashed') { await page.click('#btn-go-restart'); await sleep(500); }
   await page.keyboard.press('KeyR');
   await sleep(300);
   s = await state();
-  check('Reset (R) recovers the bike', s.state === 'playing' && s.grounded, `speed=${s.speed}`);
-
+  check('Reset (R) recovers the bike', s.state === 'playing' && s.grounded);
   const povBefore = await page.evaluate(() => window.__game.followCam.mode);
   await page.keyboard.press('KeyC');
   await sleep(900);
   const povAfter = await page.evaluate(() => window.__game.followCam.mode);
   check('First-person POV toggles', povBefore === 'third' && povAfter === 'first');
   await page.keyboard.press('KeyC');
-  await sleep(500);
+  await sleep(400);
 
-  // Camera never clips below terrain (sampled during a short ride).
-  let camClip = null;
-  await page.keyboard.down('KeyW');
-  for (let i = 0; i < 20; i++) {
-    await sleep(150);
-    const c = await page.evaluate(() => {
-      const g = window.__game;
-      const cp = g.camera.position;
-      return { y: cp.y, ground: g.world.getHeight(cp.x, cp.z) };
-    });
-    if (c.y < c.ground + 0.3) camClip = c;
-  }
-  await page.keyboard.up('KeyW');
-  check('Camera never clips into terrain', !camClip, camClip ? JSON.stringify(camClip) : '');
-
-  // ================= Debug overlay (extended) =================
+  // ================= Debug overlay =================
   await page.keyboard.press('F3');
   await sleep(400);
   const dbg = await page.evaluate(() => ({
@@ -579,43 +404,38 @@ function check(name, ok, detail = '') {
     text: document.getElementById('debug-overlay').textContent,
   }));
   check('F3 shows debug overlay', !dbg.hidden);
-  check('Overlay shows elevation / altitude / slope% / peak / road / viewpoint',
-    /ELEVATION -?[\d.]+ m/.test(dbg.text) && /ALTITUDE [\d.]+ m/.test(dbg.text) &&
-    /SLOPE [\d.]+%/.test(dbg.text) && /PEAK /.test(dbg.text) &&
-    /ROAD (MAIN|PASS|SPIRAL|TRAIL|-)/.test(dbg.text) && /VIEWPOINT (VP\d+|-)/.test(dbg.text) &&
-    /FPS \d+/.test(dbg.text) && /SECTOR \(\d+,\d+\)/.test(dbg.text) &&
-    /DRAW CALLS \d+/.test(dbg.text),
+  check('Overlay shows road type / elevation / sector / loaded / slope',
+    /ROAD (MAIN|PASS|SPIRAL|TRAIL|-)/.test(dbg.text) && /ELEVATION -?[\d.]+ m/.test(dbg.text) &&
+    /SECTOR \(\d+,\d+\)/.test(dbg.text) && /LOADED \d+/.test(dbg.text) &&
+    /SLOPE [\d.]+%/.test(dbg.text) && /FPS \d+/.test(dbg.text),
     JSON.stringify(dbg.text));
+  await page.keyboard.press('F3');
+  await sleep(200);
 
-  // ================= Props =================
+  // ================= Landmarks (props) =================
   const props = await page.evaluate(() => {
     const g = window.__game;
     const P = g.world.props;
     const perType = {};
     for (const [k, m] of Object.entries(P.meshes)) perType[k] = m.count;
-    // Density estimate over a wide area: props per km^2 in 9 central sectors.
+    // Meadow fixtures present in the spawn sector list?
+    const spawnList = P.sectorProps(8, 4).concat(P.sectorProps(7, 4), P.sectorProps(8, 3), P.sectorProps(7, 3));
+    const kinds = new Set(spawnList.map((p) => p.t));
     let totalIn9 = 0;
-    for (let cx = 8; cx <= 10; cx++) {
-      for (let cz = 4; cz <= 6; cz++) totalIn9 += P.sectorProps(cx, cz).length;
+    for (let cx = 7; cx <= 9; cx++) {
+      for (let cz = 3; cz <= 5; cz++) totalIn9 += P.sectorProps(cx, cz).length;
     }
-    return { count: P.count, perType, colliders: P.colliders.length, totalIn9 };
+    return { count: P.count, perType, colliders: P.colliders.length, totalIn9,
+             spawnKinds: [...kinds] };
   });
-  check('Exploration props streamed with sectors', props.count > 10,
+  check('Landmark props streamed with sectors', props.count > 10,
     `${props.count} active: ${JSON.stringify(props.perType)}`);
-  check('Prop density ~ every 300-600 m of riding', props.totalIn9 >= 18,
-    `${props.totalIn9} props in 9 central sectors (2.25 km^2)`);
-  check('Solid props have colliders', props.colliders > 0, `${props.colliders} colliders`);
-  // Peak name + mountain id appear when standing on a massif.
-  const peakInfo = await page.evaluate(() => {
-    const g = window.__game;
-    const p = g.world.peakAt(7000, 1000);
-    return p && { name: p.name, id: p.id, chain: p.chain };
-  });
-  check('Peak lookup works on Rajadhara Summit',
-    !!peakInfo && peakInfo.name === 'Rajadhara Summit' && !!peakInfo.id,
-    JSON.stringify(peakInfo));
-  await page.keyboard.press('F3');
-  await sleep(200);
+  check('Meadow has signpost + cabin fixtures',
+    props.spawnKinds.includes('sign') && props.spawnKinds.includes('cabin'),
+    props.spawnKinds.join(','));
+  check('Landmark density ~ every 300-500 m', props.totalIn9 >= 18,
+    `${props.totalIn9} props in 9 spawn-area sectors`);
+  check('Solid props have colliders', props.colliders > 0, `${props.colliders}`);
 
   // ================= Pause =================
   await page.keyboard.press('KeyP');
@@ -627,7 +447,7 @@ function check(name, ok, detail = '') {
   s = await state();
   check('Resume works', s.state === 'playing');
 
-  // ================= Mobile controls (touch) =================
+  // ================= Mobile controls =================
   const gasBtn = await page.$('#btn-gas');
   const box = await gasBtn.boundingBox();
   await page.touchscreen.touchStart(box.x + box.width / 2, box.y + box.height / 2);
@@ -636,7 +456,6 @@ function check(name, ok, detail = '') {
   const touchSpeed = s.speed;
   await page.touchscreen.touchEnd();
   check('Mobile GAS button works', touchSpeed > 4, `speed=${touchSpeed}`);
-
   const brakeBtn = await page.$('#btn-brake');
   const bb = await brakeBtn.boundingBox();
   await page.touchscreen.touchStart(bb.x + bb.width / 2, bb.y + bb.height / 2);

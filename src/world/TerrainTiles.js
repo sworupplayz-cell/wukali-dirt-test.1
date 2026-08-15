@@ -33,7 +33,7 @@ const RES = 32;              // quads per side -> 3.90625 m cells (exact binary)
 const CELL = TILE / RES;
 const RADIUS = 3;            // 7x7 window
 const POOL = 53;             // 49 + spare
-const WORLD_W = 10000, WORLD_H = 5000;
+const WORLD_W = 8000, WORLD_H = 4000;
 
 export class TerrainTiles {
   constructor(scene, field) {

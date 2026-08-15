@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { ChunkGrid } from './streaming/ChunkGrid.js';
-import { TerrainField } from './TerrainField.js';
+import { TerrainField, LAKE } from './TerrainField.js';
 import { TerrainTiles, CELL } from './TerrainTiles.js';
 import { FarTerrain } from './FarTerrain.js';
 import { Props } from './Props.js';
@@ -32,10 +32,10 @@ import { Props } from './Props.js';
  */
 
 export const SECTOR_SIZE = 500;
-export const WORLD_COLS = 20;
-export const WORLD_ROWS = 10;
-export const WORLD_W = SECTOR_SIZE * WORLD_COLS; // 10,000 m
-export const WORLD_H = SECTOR_SIZE * WORLD_ROWS; //  5,000 m
+export const WORLD_COLS = 16;
+export const WORLD_ROWS = 8;
+export const WORLD_W = SECTOR_SIZE * WORLD_COLS; // 8,000 m
+export const WORLD_H = SECTOR_SIZE * WORLD_ROWS; // 4,000 m
 const STREAM_RADIUS = 1; // 3x3 logical sector window
 
 export class SectorWorld {
@@ -57,23 +57,22 @@ export class SectorWorld {
     // for future gameplay streaming.
     this._grid = new ChunkGrid(SECTOR_SIZE, STREAM_RADIUS);
 
-    // Spawn ON a dirt trail near the world center, facing down the trail —
-    // deterministic scan for a FLAT stretch (the rebalanced massifs grew,
-    // so a fixed z could land on a foothill).
-    let sx = this.field.nsCenter(5, 2500), sz = 2500;
-    for (let dz = 0; dz <= 900; dz += 30) {
-      for (const s of dz === 0 ? [0] : [dz, -dz]) {
-        const z = 2500 + s;
-        const x = this.field.nsCenter(5, z);
-        const e = 8;
-        const slope = Math.hypot(
-          this.field.height(x + e, z) - this.field.height(x - e, z),
-          this.field.height(x, z + e) - this.field.height(x, z - e)
-        ) / (2 * e);
-        if (slope < 0.06) { sx = x; sz = z; dz = 1e9; break; }
-      }
-    }
-    this._spawn = { x: sx, y: this.field.height(sx, sz), z: sz, yaw: 0 };
+    // Rider's Meadow spawn: on the North-South road just above the 4-way
+    // intersection at the exact world center, facing the crossroads.
+    const sx = 4000, sz = 1965;
+    this._spawn = { x: sx, y: this.field.height(sx, sz), z: sz, yaw: 0 }; // facing the crossroads + practice jump
+
+    // Rider's Meadow lake: one static water disc (1 draw call) floating
+    // in the handcrafted lake bowl.
+    const water = new THREE.Mesh(
+      new THREE.CircleGeometry(LAKE.r * 0.92, 28),
+      new THREE.MeshLambertMaterial({ color: 0x3f7fae, transparent: true, opacity: 0.88 })
+    );
+    water.rotation.x = -Math.PI / 2;
+    water.position.set(LAKE.x, this.field.height(LAKE.x, LAKE.z) + LAKE.depth * 0.45, LAKE.z);
+    water.matrixAutoUpdate = false;
+    water.updateMatrix();
+    scene.add(water);
 
     this._surfScratch = { h: 0, trail: 0, moist: 0, mtn: 0, roadType: 0 };
 

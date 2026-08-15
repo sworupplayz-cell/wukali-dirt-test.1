@@ -22,7 +22,7 @@ import { hash01, mulberry32, hashInt } from './noise.js';
  * existing prop-collider system); flags/signs/rest spots are ride-through.
  */
 
-const CAP = { flags: 48, sign: 48, rocks: 64, lookout: 24, cabin: 32, cave: 24, rest: 48 };
+const CAP = { flags: 48, sign: 48, rocks: 64, lookout: 24, cabin: 32, cave: 24, rest: 48, bench: 32, bridge: 16 };
 
 export class Props {
   constructor(scene, field) {
@@ -41,6 +41,8 @@ export class Props {
       cabin: { geo: buildCabin(), max: CAP.cabin, mat, coll: 3.2 },
       cave: { geo: buildCave(), max: CAP.cave, mat, coll: 3.0 },
       rest: { geo: buildRest(), max: CAP.rest, mat, coll: 0 },
+      bench: { geo: buildBench(), max: CAP.bench, mat, coll: 0 },
+      bridge: { geo: buildBridge(), max: CAP.bridge, mat, coll: 0 },
     };
     this.meshes = {};
     for (const [k, t] of Object.entries(this.types)) {
@@ -70,6 +72,12 @@ export class Props {
     const rng = mulberry32(hashInt(cx, cz, 0x9d2f));
     const ox = cx * 500, oz = cz * 500;
 
+    // Rider's Meadow fixtures (handcrafted: signpost, cabin, flags, benches).
+    for (const fx of lf.meadowFixtures) {
+      if (fx.x < ox || fx.x >= ox + 500 || fx.z < oz || fx.z >= oz + 500) continue;
+      list.push({ t: fx.t, x: fx.x, z: fx.z, y: field.height(fx.x, fx.z), yaw: fx.yaw, s: fx.s });
+    }
+
     // Viewpoints in this sector: lookout platform + flags beside the road.
     for (const v of lf.viewpoints) {
       if (v.x < ox || v.x >= ox + 500 || v.z < oz || v.z >= oz + 500) continue;
@@ -86,9 +94,10 @@ export class Props {
       list.push({ t: 'flags', x: px, z: pz, y: field.height(px, pz), yaw: rng() * 6.28, s: 1.15 });
     }
 
-    // Ambient scatter: 5 candidates, terrain-classified.
+    // Ambient scatter: 6 candidates, terrain-classified (~1 landmark per
+    // 300-500 m of riding).
     const info = this._info;
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 6; i++) {
       const px = ox + 40 + rng() * 420, pz = oz + 40 + rng() * 420;
       field.sample(px, pz, info);
       const e = 6;
@@ -99,10 +108,15 @@ export class Props {
       const yaw = rng() * 6.28;
       const r = rng();
       if (info.trail > 0.4 && sl < 0.2) {
-        // Beside a road/trail: signpost or resting spot (shifted off the bed).
-        const t = r < 0.55 ? 'sign' : 'rest';
-        const qx = px + 9, qz = pz + 4;
-        list.push({ t, x: qx, z: qz, y: field.height(qx, qz), yaw, s: 0.95 + rng() * 0.2 });
+        // Beside a road/trail: signpost, resting spot, scenic bench or a
+        // short wooden bridge deck over the trail dip.
+        const t = r < 0.4 ? 'sign' : r < 0.65 ? 'rest' : r < 0.85 ? 'bench' : 'bridge';
+        if (t === 'bridge') {
+          list.push({ t, x: px, z: pz, y: field.height(px, pz) - 0.1, yaw, s: 1 });
+        } else {
+          const qx = px + 9, qz = pz + 4;
+          list.push({ t, x: qx, z: qz, y: field.height(qx, qz), yaw, s: 0.95 + rng() * 0.2 });
+        }
       } else if (info.mtn > 0.65 && sl > 0.28 && r < 0.5) {
         list.push({ t: 'cave', x: px, z: pz, y: field.height(px, pz), yaw, s: 1 + rng() * 0.4 });
       } else if (info.mtn > 0.2 && info.mtn < 0.75 && sl < 0.14 && r < 0.5) {
@@ -246,6 +260,32 @@ function buildCave() {
   const mouth = new THREE.CircleGeometry(1.15, 10, 0, Math.PI);
   mouth.translate(0, 0.85, 0.42);
   parts.push(colored(mouth, 0.03, 0.03, 0.045)); // dark opening
+  return mergeGeometries(parts);
+}
+
+/** Scenic bench: plank seat + back on two supports. */
+function buildBench() {
+  const parts = [];
+  parts.push(box(1.9, 0.09, 0.5, 0, 0.46, 0, 0.5, 0.38, 0.24));      // seat
+  parts.push(box(1.9, 0.42, 0.08, 0, 0.78, -0.24, 0.48, 0.36, 0.23)); // back
+  parts.push(box(0.12, 0.46, 0.5, -0.8, 0.23, 0, 0.38, 0.28, 0.18));  // legs
+  parts.push(box(0.12, 0.46, 0.5, 0.8, 0.23, 0, 0.38, 0.28, 0.18));
+  return mergeGeometries(parts);
+}
+
+/** Short wooden bridge deck: planks + two side rails (ride-through). */
+function buildBridge() {
+  const parts = [];
+  for (let i = 0; i < 7; i++) {
+    parts.push(box(0.52, 0.09, 3.4, -1.7 + 0.55 * i, 0.06, 0, 0.48, 0.36, 0.22));
+  }
+  parts.push(box(3.9, 0.12, 0.14, 0, 0.5, -1.62, 0.42, 0.31, 0.19)); // rails
+  parts.push(box(3.9, 0.12, 0.14, 0, 0.5, 1.62, 0.42, 0.31, 0.19));
+  for (const zx of [-1.75, 1.75]) {
+    for (const zz of [-1.62, 1.62]) {
+      parts.push(box(0.14, 0.52, 0.14, zx, 0.26, zz, 0.4, 0.29, 0.18));
+    }
+  }
   return mergeGeometries(parts);
 }
 

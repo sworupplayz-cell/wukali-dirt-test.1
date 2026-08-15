@@ -15,18 +15,18 @@ export function colorFor(info, out) {
   // Lowland grass.
   let r = 0.52 - 0.20 * m, g = 0.60 - 0.10 * m, b = 0.30 - 0.06 * m;
 
-  // Dry scrub in the deep basins.
-  const dry = sstep(-5, -60, h);
-  r += (0.60 - r) * dry; g += (0.55 - g) * dry; b += (0.36 - b) * dry;
+  // Dry scrub on the lowest valley floors.
+  const dry = sstep(160, 110, h);
+  r += (0.58 - r) * dry * 0.5; g += (0.55 - g) * dry * 0.5; b += (0.36 - b) * dry * 0.5;
 
-  // Alpine rock band.
-  const rock = sstep(500, 1400, h);
+  // Alpine rock band (redesigned world: valleys ~100-350, peaks to ~2200).
+  const rock = sstep(420, 1050, h);
   r += (0.46 + 0.05 * m - r) * rock;
   g += (0.42 + 0.04 * m - g) * rock;
   b += (0.38 + 0.03 * m - b) * rock;
 
   // Snow cap.
-  const snow = sstep(2350, 3150, h);
+  const snow = sstep(1650, 2050, h);
   r += (0.93 - r) * snow; g += (0.95 - g) * snow; b += (0.98 - b) * snow;
 
   // Dirt trail / road bed (kept visible at any altitude).

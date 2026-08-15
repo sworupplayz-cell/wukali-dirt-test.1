@@ -2,20 +2,21 @@
 
 A lightweight, Android-first, 3D off-road dirt-bike game.
 
-**Current status: Phase 3 — Rideable world rebalance.** The continent was
-resculpted for motorcycle exploration: peaks cut ~40-45% (highest: Rajadhara
-Summit ~2650 m, average peaks 900-1800 m), wider flanks (max road grade 12
-deg, natural slopes mostly under 18 deg with valley walls decorative),
-basin pans dead-flat for future villages, eased gorges and escarpments.
-The road network is a real hierarchy now: 3 MAIN roads (8 m, <= 12% grade,
-long flowing curves — the Great East Road crosses the whole world), 12
-mountain PASS roads (4.5 m switchbacks + hairpins), the summit SPIRAL, and
-the lowland TRAIL network. 16 scenic viewpoints are computed ON the roads
-(every one reachable by riding) and marked with lookout platforms + prayer
-flags. Lightweight instanced exploration props (prayer flags, signposts,
-rock formations, lookouts, cabins, cave entrances, resting spots — 7 draw
-calls total) stream with the sector window. F3 adds road type, road slope
-and nearest viewpoint.
+**Current status: Phase 3 — Rideable world redesign (roads-first).** The
+world was rebuilt on a reduced 8,000 x 4,000 m map (128 permanent 500 m
+sectors, 16x8) with a new design philosophy: ROADS are generated first,
+mountains are scenery. The Horizon Loop (7 m main road, 15.3 km) circles
+the whole map and four arms meet at a 4-way crossroads in RIDER'S MEADOW —
+a handcrafted spawn area at the world center with a small lake, gentle
+grass hills, a signpost, an abandoned cabin, scenic benches and a practice
+jump. Main-road corridors suppress the landforms around them (the corridor
+IS the valley), 4 connected perimeter ranges hold 16 named peaks (highest
+Kanjiro Peak ~2200 m) built from a new domain-warped spine-profile
+algorithm (the old mountain algorithm is deleted), 6 switchback pass roads
+cross the range saddles, and a hidden lowland trail grid with kickers fills
+the interior. Road-computed viewpoints, instanced landmark props (now with
+scenic benches and wooden bridge decks), the far-LOD backdrop and the F3
+overlay (road type, elevation, sector, loaded, slope) all carry over.
 
 ## Tech
 

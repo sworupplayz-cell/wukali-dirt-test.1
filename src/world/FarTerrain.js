@@ -19,9 +19,9 @@ import { colorFor } from './palette.js';
  */
 
 const STEP = 62.5; // 160x80 world grid (exact binary) — ~25 k triangles total
-const W = 10000, H = 5000;
+const W = 8000, H = 4000;
 const CHUNKS_X = 2, CHUNKS_Z = 2;
-const DISCARD_NEAR = 385; // near tile window covers to ~437 m
+const DISCARD_NEAR = 330; // near tile window worst-case covers 375 m
 
 export class FarTerrain {
   constructor(scene, field) {
@@ -53,7 +53,7 @@ export class FarTerrain {
             const wx = ox + i * STEP, wz = oz + j * STEP;
             field.sample(wx, wz, info);
             pos[v * 3] = wx;
-            pos[v * 3 + 1] = info.h - 2.0; // sit under the near tiles
+            pos[v * 3 + 1] = info.h - 1.0; // sit just under the near tiles
             pos[v * 3 + 2] = wz;
             colorFor(info, rgb);
             col[v * 3] = rgb[0]; col[v * 3 + 1] = rgb[1]; col[v * 3 + 2] = rgb[2];
