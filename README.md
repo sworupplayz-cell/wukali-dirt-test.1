@@ -2,13 +2,16 @@
 
 A lightweight, Android-first, 3D off-road dirt-bike game.
 
-**Current status: Phase 1B — Fixed world streaming engine.** The game now
-runs on a PERMANENT, FINITE world: 10,000 m x 5,000 m (50 km^2) divided into
-200 fixed 500 m sectors (20 columns x 10 rows). A 3x3 sector window streams
-around the bike with pooled meshes — no loading screens, no infinite
-coordinates. Sectors are flat placeholder planes with per-sector debug tints
-(terrain content arrives in later phases). A developer overlay (F3 / DBG
-button) shows FPS, position, current sector, loaded sectors and draw calls.
+**Current status: Phase 2 — Seamless terrain foundation.** The fixed
+10,000 m x 5,000 m world (200 permanent 500 m sectors, 3x3 streaming window)
+now carries one seamless sculpted terrain: gentle hills, rolling valleys,
+soft ridge lines, wide plains, small natural bumps, dirt trail kickers and a
+deterministic dirt-trail network that follows the land. Height is a pure
+analytic function of world coordinates, so sector/tile borders are
+bit-identical — zero seams by construction — and physics never waits for a
+mesh. Bike feel was tuned for the rolling terrain (suspension, landing
+absorption, brake bite, steering attack). The F3 overlay adds terrain
+height, player altitude and slope.
 
 ## Tech
 
@@ -43,19 +46,28 @@ Steering modes (Settings): buttons, virtual handlebar, tilt, swipe.
 
 ## Architecture
 
-World (Phase 1B streaming engine):
+World (Phase 2 terrain foundation on the Phase 1B streaming engine):
 
-- `src/world/SectorWorld.js` — the fixed world: permanent 20x10 sector grid
-  (500 m sectors, IDs (0,0)..(19,9)), 3x3 streaming window, pooled flat
-  sector planes with deterministic debug tints, sky/fog/sun. Implements the
-  sampling interface the bike consumes — `{ getHeight, getNormal,
-  getColliders, getSurface, getRenderedPlane, getSpawn, isInBounds, update }`.
-  Spawn is the exact world center (5000, 2500). Riding off the world edge
-  triggers the bike's existing safe-spot reset (no invisible walls).
-- `src/world/streaming/ChunkGrid.js` — sector window bookkeeping with
-  enter/leave deltas (drives the 3x3 streaming).
+- `src/world/TerrainField.js` — the analytic ground truth: height, trail
+  mask and moisture as pure deterministic functions of world (x, z).
+  Plains/valleys, gentle hills, region-masked ridge lines, natural bumps,
+  sharp-crested dirt kickers on trails, smooth whoops in the open, and a
+  wandering NS/EW dirt-trail network worn 0.2 m into the ground.
+- `src/world/TerrainTiles.js` — render layer: pooled 125 m terrain tiles
+  (7x7 window, 32x32 quads on an exact-binary global lattice) rebuilt
+  nearest-first 2-3/frame. Shared vertex-colored Lambert material, no
+  textures. Borders are bit-identical => zero seams, no skirts needed.
+- `src/world/SectorWorld.js` — the fixed world facade: permanent 20x10
+  sector grid (500 m sectors, IDs (0,0)..(19,9)), 3x3 logical sector window
+  (gameplay content attaches here in later phases), world interface for the
+  bike — `{ getHeight, getNormal, getColliders, getSurface,
+  getRenderedPlane, getSpawn, isInBounds, update }` — plus `slopeAt` for
+  the debug overlay. Spawn sits on a dirt trail near the world center.
+- `src/world/streaming/ChunkGrid.js` — window bookkeeping with enter/leave
+  deltas (drives both the sector and the tile windows).
 - `src/world/streaming/ObjectPool.js` — fixed-capacity mesh pool
-  (sector load/unload never allocates).
+  (tile load/unload never allocates).
+- `src/world/noise.js` — seeded hashing / value noise / fBM utilities.
 
 Game core (preserved foundation):
 
@@ -76,7 +88,8 @@ Game core (preserved foundation):
 - `src/core/GameAudio.js` — synthesized engine + optional music (no assets).
 - `src/ui/UI.js`, `src/ui/HudEditor.js` — DOM overlays + HUD layout editor.
 - `src/ui/DebugOverlay.js` — developer overlay (F3 / DBG button): FPS,
-  player X/Z, current sector, loaded sectors, draw calls.
+  player X/Z, current sector, loaded sectors/tiles, terrain height, player
+  altitude, slope, draw calls.
 
 ## Tests
 

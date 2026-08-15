@@ -38,11 +38,16 @@ export class DebugOverlay {
     const p = g.bike.position;
     const d = g.world.debug;
     const info = g.renderer.info.render;
+    const groundH = g.world.getHeight(p.x, p.z);
+    const slope = g.world.slopeAt ? g.world.slopeAt(p.x, p.z) : 0;
     this.el.textContent =
       `FPS ${g.stats.fps}\n` +
       `X ${p.x.toFixed(1)}  Z ${p.z.toFixed(1)}\n` +
       `SECTOR (${d.sectorX},${d.sectorZ})\n` +
-      `LOADED ${d.loaded}\n` +
+      `LOADED ${d.loaded}  TILES ${d.tiles ?? 0}\n` +
+      `TERRAIN H ${groundH.toFixed(2)} m\n` +
+      `ALTITUDE ${Math.max(0, p.y - groundH).toFixed(2)} m\n` +
+      `SLOPE ${(Math.atan(slope) * 180 / Math.PI).toFixed(1)}\u00B0\n` +
       `DRAW CALLS ${info.calls}  TRIS ${info.triangles}`;
   }
 }

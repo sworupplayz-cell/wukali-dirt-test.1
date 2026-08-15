@@ -1,31 +1,30 @@
 import * as THREE from 'three';
 import { ChunkGrid } from './streaming/ChunkGrid.js';
-import { ObjectPool } from './streaming/ObjectPool.js';
+import { TerrainField } from './TerrainField.js';
+import { TerrainTiles, CELL } from './TerrainTiles.js';
 
 /**
- * SectorWorld — Horizon Ride Phase 1B fixed-world streaming engine.
+ * SectorWorld — Horizon Ride fixed-world streaming engine.
  *
- * A PERMANENT, FINITE world coordinate system:
+ * Phase 1B established the PERMANENT world coordinate system:
  *   world rectangle:  10,000 m (x) x 5,000 m (z)   = 50 km^2
  *   sector size:      500 m x 500 m
  *   grid:             20 columns x 10 rows = 200 fixed sectors
+ * Sector IDs are fixed forever: (0,0)..(19,9); coordinates are never
+ * generated outside the rectangle.
  *
- * Sector (col,row) covers x in [col*500, col*500+500), z likewise.
- * Sector IDs are fixed forever: (0,0) .. (19,9). Coordinates are never
- * generated outside this rectangle — streaming requests outside the grid
- * are simply skipped.
+ * Phase 2 replaces the flat debug planes with one seamless sculpted
+ * terrain, WITHOUT touching the streaming architecture:
+ *   - the 3x3 SECTOR window (ChunkGrid) remains the logical streaming
+ *     layer — sector enter/leave is where future phases will hang
+ *     gameplay content (props, colliders, spawns);
+ *   - TerrainField is the analytic ground truth: height is a pure
+ *     deterministic function of world (x, z), so physics NEVER waits for
+ *     meshes and every sector matches its neighbors exactly;
+ *   - TerrainTiles renders the field as pooled 125 m tiles on a shared
+ *     global lattice (bit-identical borders => zero seams).
  *
- * STREAMING: a 3x3 sector window (Chebyshev radius 1) follows the player,
- * driven by the retained ChunkGrid utility. Ground meshes come from a
- * fixed ObjectPool — sectors load/unload while riding with zero allocation
- * and no loading screen.
- *
- * PLACEHOLDER TERRAIN (this phase only): every sector is a flat plane with
- * a deterministic per-sector debug tint so streaming is visible. No hills,
- * no props, no decorations. The analytic heightfield is y = 0 everywhere,
- * so bike physics is exact and never waits on meshes.
- *
- * Implements the exact world interface the bike/camera/model consume:
+ * World interface consumed by the bike/camera/model (unchanged):
  * { getHeight, getNormal, getColliders, getSurface, getRenderedPlane,
  *   getSpawn, isInBounds, update }.
  */
@@ -35,40 +34,67 @@ export const WORLD_COLS = 20;
 export const WORLD_ROWS = 10;
 export const WORLD_W = SECTOR_SIZE * WORLD_COLS; // 10,000 m
 export const WORLD_H = SECTOR_SIZE * WORLD_ROWS; //  5,000 m
-const STREAM_RADIUS = 1; // 3x3 active window
+const STREAM_RADIUS = 1; // 3x3 logical sector window
 
 export class SectorWorld {
   constructor(scene) {
     this.scene = scene;
-    // Spawn at the exact world center, facing +Z.
-    this._spawn = { x: WORLD_W / 2, y: 0, z: WORLD_H / 2, yaw: 0 };
+    this.field = new TerrainField();
+    this.tiles = new TerrainTiles(scene, this.field);
     this._colliders = []; // no props this phase
     this._buildLighting(scene);
 
-    // 3x3 window = 9 sectors max; +1 spare so enter-before-release order
-    // changes can never starve the pool.
-    this._pool = new ObjectPool(() => this._makeSectorMesh(), 10);
+    // Logical 3x3 sector window (Phase 1B architecture, preserved).
+    // Sectors carry no meshes now — terrain rendering moved to the finer
+    // tile layer — but the window still tracks which sectors are "active"
+    // for future gameplay streaming.
     this._grid = new ChunkGrid(SECTOR_SIZE, STREAM_RADIUS);
-    this._tint = new THREE.Color();
+
+    // Spawn ON a dirt trail near the world center, facing down the trail.
+    const sx = this.field.nsCenter(5, 2500); // NS trail #5 crosses mid-world
+    this._spawn = { x: sx, y: this.field.height(sx, 2500), z: 2500, yaw: 0 };
+
+    this._surfScratch = { h: 0, trail: 0, moist: 0 };
 
     // Debug/HUD info (read by the F3 overlay + tests). Updated in update().
-    this.debug = { sectorX: 0, sectorZ: 0, loaded: 0 };
+    this.debug = { sectorX: 0, sectorZ: 0, loaded: 0, tiles: 0 };
   }
 
-  // ---- Heightfield (flat placeholder) --------------------------------------
+  // ---- Heightfield ----------------------------------------------------------
 
-  getHeight() {
-    return 0;
+  getHeight(x, z) {
+    return this.field.height(x, z);
   }
 
   getNormal(x, z, out) {
-    out.set(0, 1, 0);
+    const e = 0.6;
+    const hx = this.field.height(x + e, z) - this.field.height(x - e, z);
+    const hz = this.field.height(x, z + e) - this.field.height(x, z - e);
+    out.set(-hx, 2 * e, -hz).normalize();
     return out;
   }
 
+  /**
+   * The RENDERED terrain plane near a point: the analytic field sampled on
+   * the tiles' global 3.125 m lattice with the fixed diagonal split —
+   * exactly the triangle the player sees. Wheel seating and the blob
+   * shadow use this so tyres sit on the visible surface, not up to a few
+   * cm off between lattice vertices.
+   */
   getRenderedPlane(x, z, out) {
-    out.y = 0;
-    out.n.set(0, 1, 0);
+    const cs = CELL;
+    const f = this.field;
+    const gx = Math.floor(x / cs) * cs, gz = Math.floor(z / cs) * cs;
+    const fx = (x - gx) / cs, fz = (z - gz) / cs;
+    const h00 = f.height(gx, gz), h10 = f.height(gx + cs, gz);
+    const h01 = f.height(gx, gz + cs), h11 = f.height(gx + cs, gz + cs);
+    if (fx + fz <= 1) {
+      out.y = h00 + (h10 - h00) * fx + (h01 - h00) * fz;
+      out.n.set(-(h10 - h00) / cs, 1, -(h01 - h00) / cs).normalize();
+    } else {
+      out.y = h11 + (h01 - h11) * (1 - fx) + (h10 - h11) * (1 - fz);
+      out.n.set(-(h11 - h01) / cs, 1, -(h11 - h10) / cs).normalize();
+    }
     return out;
   }
 
@@ -76,11 +102,16 @@ export class SectorWorld {
     return this._colliders;
   }
 
-  /** Uniform packed-dirt test surface. */
+  /**
+   * Surface material under the wheels: groomed dirt trail (full grip,
+   * free-rolling, near-smooth) fading into open grass/dirt country
+   * (slightly loose, mildly draggy, bumpy).
+   */
   getSurface(x, z, out) {
-    out.grip = 0.95;
-    out.drag = 0.03;
-    out.rough = 0.15;
+    const t = this.field.sample(x, z, this._surfScratch).trail;
+    out.grip = 0.92 + 0.08 * t;
+    out.drag = 0.055 - 0.043 * t;
+    out.rough = 0.34 - 0.27 * t;
     return out;
   }
 
@@ -91,7 +122,7 @@ export class SectorWorld {
   /**
    * Finite world: no invisible walls (boundaries disabled), but riding
    * fully off the 10,000 x 5,000 rectangle triggers the bike's existing
-   * safe-spot reset failsafe rather than falling into the void.
+   * safe-spot reset failsafe rather than falling off the terrain.
    */
   isInBounds(x, z) {
     return x >= 0 && x < WORLD_W && z >= 0 && z < WORLD_H;
@@ -105,35 +136,36 @@ export class SectorWorld {
     };
   }
 
+  /** Slope (rise/run) under a point — debug overlay. */
+  slopeAt(x, z) {
+    const e = 1.5;
+    const hx = this.field.height(x + e, z) - this.field.height(x - e, z);
+    const hz = this.field.height(x, z + e) - this.field.height(x, z - e);
+    return Math.hypot(hx, hz) / (2 * e);
+  }
+
   // ---- Streaming ------------------------------------------------------------
 
-  /** Per-frame: keep the 3x3 sector window centered on the player. */
+  /** Per-frame: sector window (logical) + terrain tile window (render). */
   update(pos) {
     this._grid.update(
       pos.x, pos.z,
-      (cx, cz) => this._loadSector(cx, cz),
-      (cx, cz, mesh) => this._unloadSector(mesh)
+      (cx, cz) => this._sectorEnter(cx, cz),
+      () => {}
     );
+    this.tiles.update(pos.x, pos.z);
+
     const s = this.sectorAt(pos.x, pos.z);
     this.debug.sectorX = s.x;
     this.debug.sectorZ = s.z;
     this.debug.loaded = this._countLoaded();
+    this.debug.tiles = this.tiles.count();
   }
 
-  _loadSector(cx, cz) {
-    // Never generate outside the permanent 20x10 grid.
+  _sectorEnter(cx, cz) {
+    // Sectors outside the permanent 20x10 grid are never activated.
     if (cx < 0 || cx >= WORLD_COLS || cz < 0 || cz >= WORLD_ROWS) return null;
-    const mesh = this._pool.acquire();
-    if (!mesh) return null; // cannot happen with a sized pool
-    mesh.position.set(cx * SECTOR_SIZE + SECTOR_SIZE / 2, 0, cz * SECTOR_SIZE + SECTOR_SIZE / 2);
-    mesh.updateMatrix();
-    mesh.material.color.copy(this._sectorTint(cx, cz));
-    mesh.visible = true;
-    return mesh;
-  }
-
-  _unloadSector(mesh) {
-    if (mesh) this._pool.release(mesh);
+    return { cx, cz }; // logical record; gameplay content attaches here later
   }
 
   _countLoaded() {
@@ -142,35 +174,10 @@ export class SectorWorld {
     return n;
   }
 
-  /** Deterministic per-sector debug tint (green family, clearly distinct). */
-  _sectorTint(cx, cz) {
-    // Small integer hash -> stable pseudo-random in [0,1).
-    let h = (cx * 73856093) ^ (cz * 19349663);
-    h = (h ^ (h >>> 13)) * 1274126177;
-    const r = ((h ^ (h >>> 16)) >>> 0) / 4294967296;
-    // Hue wanders green->olive->teal; lightness alternates checker-style so
-    // even similar hues read as different sectors at a glance.
-    const hue = 0.21 + r * 0.16;
-    const light = 0.3 + 0.1 * ((cx + cz) % 2) + r * 0.05;
-    return this._tint.setHSL(hue, 0.42, light);
-  }
-
-  _makeSectorMesh() {
-    const mesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(SECTOR_SIZE, SECTOR_SIZE),
-      new THREE.MeshLambertMaterial({ color: 0x7a9a52 })
-    );
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.matrixAutoUpdate = false;
-    mesh.visible = false;
-    this.scene.add(mesh);
-    return mesh;
-  }
-
   _buildLighting(scene) {
     const sky = new THREE.Color(0x7ec4e8);
     scene.background = sky;
-    scene.fog = new THREE.Fog(sky, 120, 380); // hides the streaming edge
+    scene.fog = new THREE.Fog(sky, 140, 400); // hides the tile-window edge
     scene.add(new THREE.HemisphereLight(0xd4ebff, 0x7d6a44, 0.92));
     const sun = new THREE.DirectionalLight(0xffedc9, 1.22);
     sun.position.set(60, 90, 30);

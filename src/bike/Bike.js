@@ -134,7 +134,9 @@ export class Bike {
     const trick = this.crashed ? 0 : (input.trick || 0);
 
     // Smooth the steering input so touch taps don't snap the bike.
-    this.steer += (steerIn - this.steer) * Math.min(1, 10 * dt);
+    // (Phase 2 feel: slightly quicker attack, so the bike answers the bar
+    // on rolling terrain without becoming twitchy.)
+    this.steer += (steerIn - this.steer) * Math.min(1, 12 * dt);
 
     // Refresh the surface material under the wheels at ~20 Hz (one cheap
     // analytic mask sample — the bike's only extra terrain query).
@@ -189,11 +191,11 @@ export class Bike {
     const slopeGrip = 1 - 0.75 * Math.min(1, Math.max(0, (climb - 0.55) / 0.3));
     const grip = slopeGrip * this.surface.grip;
     this.slip = 0;
-    // SP-1: brake force ramps in over ~0.12 s so a tap slows instead of
+    // SP-1: brake force ramps in over ~0.1 s so a tap slows instead of
     // grabbing; reverse needs a deliberate ~0.35 s hold through the final
     // skid (no more surprise backward creep when stopping hard, but wedge
-    // recovery stays quick).
-    this._brakeEff += (brake - this._brakeEff) * Math.min(1, 9 * dt);
+    // recovery stays quick). Phase 2: slightly faster bite for trail feel.
+    this._brakeEff += (brake - this._brakeEff) * Math.min(1, 11 * dt);
     if (Math.abs(this.speed) < 1.5 && brake > 0) this._stillT += dt;
     else this._stillT = 0;
     if (throttle > 0) {
@@ -361,7 +363,7 @@ export class Bike {
       dPitch = this._trickVel * dt;
       this.airPitch += dPitch;
     } else {
-      dPitch = (throttle * 0.9 - brake * 1.4) * dt;
+      dPitch = (throttle * 1.0 - brake * 1.45) * dt;
       this.airPitch += dPitch;
       if (Math.abs(this.airPitch - dPitch) <= 1.0) {
         // Gentle mode keeps the old +-1.0 clamp; never snap back mid-flip.
@@ -415,14 +417,17 @@ export class Bike {
       this.speed = this.velocity.x * this.forward.x + this.velocity.z * this.forward.z;
       // Hard landings soak momentum into the suspension instead of the
       // rider keeping every m/s for free (rough landings feel weighty).
+      // Phase 2 landing absorption: a touch less speed scrub, more of the
+      // impact routed into visible suspension travel — landings feel
+      // cushioned rather than braked.
       const impact = Math.max(0, -this.velocity.y - 5.5);
-      this.speed *= 1 - Math.min(0.28, impact * 0.022);
+      this.speed *= 1 - Math.min(0.22, impact * 0.018);
       this.speed = THREE.MathUtils.clamp(this.speed, MAX_REVERSE, MAX_DOWNHILL);
 
       if (this.velocity.y < CRASH_LAND_VY && Math.abs(this.airPitch) > CRASH_LAND_PITCH) {
         this._crash();
       }
-      this._suspVel += THREE.MathUtils.clamp(this.velocity.y * 0.25, -5, 0);
+      this._suspVel += THREE.MathUtils.clamp(this.velocity.y * 0.3, -6, 0);
       this.velocity.set(0, 0, 0);
     }
   }
@@ -476,9 +481,11 @@ export class Bike {
 
   _updateSuspension(dt) {
     // Critically-damped-ish spring for the visual chassis bob.
-    const k = 60, damp = 9;
+    // Phase 2: stiffer spring + a little more travel — the bike soaks
+    // rolling-terrain bumps visibly and recovers faster after landings.
+    const k = 72, damp = 10;
     this._suspVel += (-this.suspension * k - this._suspVel * damp) * dt;
-    this.suspension = THREE.MathUtils.clamp(this.suspension + this._suspVel * dt, -0.18, 0.1);
+    this.suspension = THREE.MathUtils.clamp(this.suspension + this._suspVel * dt, -0.22, 0.12);
   }
 
   _updateOrientation(dt) {
