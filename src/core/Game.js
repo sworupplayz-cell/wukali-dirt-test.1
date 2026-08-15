@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { WorldManager } from '../world/WorldManager.js';
+import { TestWorld } from '../world/TestWorld.js';
 import { Bike } from '../bike/Bike.js';
 import { BikeModel } from '../bike/BikeModel.js';
 import { Input } from './Input.js';
@@ -7,11 +7,7 @@ import { FollowCamera } from './FollowCamera.js';
 import { GameAudio } from './GameAudio.js';
 import { RunStats } from './RunStats.js';
 import { StuntTracker } from './StuntTracker.js';
-import { Achievements } from './Achievements.js';
 import { Settings } from './Settings.js';
-import { TimeTrial } from './TimeTrial.js';
-import { NatureSpots } from '../world/NatureSpots.js';
-import { Challenges } from './Challenges.js';
 
 export const State = {
   MENU: 'menu',
@@ -38,11 +34,10 @@ export class Game {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
 
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(68, 1, 0.1, 5200); // far covers the ridge backdrop
+    this.camera = new THREE.PerspectiveCamera(68, 1, 0.1, 800);
 
-    // Deterministic world; ?seed=N in the URL selects a different one.
-    const seed = Number(new URLSearchParams(location.search).get('seed')) || 20;
-    this.world = new WorldManager(this.scene, seed);
+    // Horizon Ride Phase 1A: one static test scene — no procedural world.
+    this.world = new TestWorld(this.scene);
     this.bike = new Bike(this.world);
     this.bikeModel = new BikeModel(this.scene);
     this.followCam = new FollowCamera(this.camera, this.world);
@@ -52,14 +47,7 @@ export class Game {
     this.audio = new GameAudio();
     this.run = new RunStats();
     this.stunts = new StuntTracker();
-    this.achievements = new Achievements();
-    this.trials = new TimeTrial(this.scene, this.world, this.achievements);
-    this.nature = new NatureSpots(this.scene, this.world.generator, seed);
-    this.challenges = new Challenges(this.scene, this.world, this.stunts, this.achievements);
-    this.onDiscover = null; // UI shows the discovery toast
-    this.onSummit = null; // UI shows the summit banner
     this.newBest = false; // set when the run that just ended beat the best
-    this._summitT = 0;
 
     this.bike.onCrash = () => {
       // Defer the transition to the end of the physics step so the stunt
@@ -119,8 +107,6 @@ export class Game {
     this.run.endRun(); // quitting mid-run still records a best
     this.bike.fullReset();
     this.followCam.snapTo(this.bike);
-    this.trials.cancel();
-    this.challenges.cancel();
     this._startRun();
     this._setState(State.PLAYING);
   }
@@ -128,8 +114,6 @@ export class Game {
   toMenu() {
     this.run.endRun();
     this.audio.setEngine(0, 0, false);
-    this.trials.cancel();
-    this.challenges.cancel();
     this._setState(State.MENU);
   }
 
@@ -145,8 +129,6 @@ export class Game {
     this.bike.reset();
     this.followCam.snapTo(this.bike);
     this.stunts.cancel(); // teleport invalidates any in-flight stunt/combo
-    this.trials.cancel();
-    this.challenges.cancel();
   }
 
   _startRun() {
@@ -190,9 +172,6 @@ export class Game {
     this.input.enabled = this.state === State.PLAYING;
     this.input.update();
 
-    // Stream chunks around the bike (also in the menu, for the backdrop).
-    this.world.update(this.bike.position, frameDt);
-
     if (simulating) {
       this._accumulator = Math.min(this._accumulator + frameDt, FIXED_DT * MAX_STEPS);
       while (this._accumulator >= FIXED_DT) {
@@ -209,60 +188,7 @@ export class Game {
         // A genuine crash ends the run (minor bumps never reach here).
         this._crashPending = false;
         this.newBest = this.run.endRun();
-        this.trials.cancel(); // a crashed run forfeits the trial
-        this.challenges.cancel();
         this._setState(State.CRASHED);
-      }
-      // Summit detection: cheap check at 4 Hz, never per frame.
-      this._summitT += frameDt;
-      if (this._summitT > 0.25) {
-        this._summitT = 0;
-        if (this.state === State.PLAYING && this.bike.grounded && !this.bike.crashed) {
-          const m = this.world.summitAt(this.bike.position.x, this.bike.position.z);
-          if (m) {
-            const res = this.achievements.reachSummit(m); // null if already conquered
-            if (res && this.onSummit) this.onSummit(res);
-          }
-        }
-      }
-      // Time trials (Phase 3K-1): 2 Hz gate scan when idle, one distance
-      // check per frame while running.
-      if (this.state === State.PLAYING) this.trials.update(this.bike, frameDt);
-      // Nature discoveries (Phase 3K-2): 2 Hz proximity scan.
-      if (this.state === State.PLAYING) {
-        const rec = this.nature.update(this.bike.position.x, this.bike.position.z, frameDt);
-        if (rec) {
-          const res = this.achievements.discover(rec.id, rec.name);
-          if (res && this.onDiscover) this.onDiscover({ ...res, type: rec.type });
-        }
-      }
-      // Stunt/off-road/trail challenges (Phase 3K-3).
-      if (this.state === State.PLAYING) this.challenges.update(this.bike, frameDt);
-      // Village + town discoveries (Phase 3L-1/2).
-      if (this.state === State.PLAYING) {
-        const v = this.world.villages.update(this.bike.position.x, this.bike.position.z, frameDt);
-        if (v) {
-          const res = this.achievements.discover(v.id, v.name);
-          if (res && this.onDiscover) this.onDiscover({ ...res, type: 'village' });
-        }
-        const t = this.world.towns.update(this.bike.position.x, this.bike.position.z, frameDt);
-        if (t) {
-          const res = this.achievements.discover(t.id, t.name);
-          if (res && this.onDiscover) this.onDiscover({ ...res, type: 'town' });
-        }
-        const cy = this.world.cities.update(this.bike.position.x, this.bike.position.z, frameDt);
-        if (cy) {
-          const res = this.achievements.discover(cy.id, cy.name);
-          if (res && this.onDiscover) this.onDiscover({ ...res, type: 'city' });
-        }
-        // Industrial zones + large stadiums (Phase 3L-4).
-        const iz = this.world.industry.update(this.bike.position.x, this.bike.position.z, frameDt);
-        if (iz) {
-          const res = this.achievements.discover(iz.id, iz.name);
-          if (res && this.onDiscover) this.onDiscover({ ...res, type: iz.kind });
-        }
-        // Ambient NPCs + traffic (Phase 3N): pooled, no colliders, no physics.
-        this.world.population.update(this.bike.position.x, this.bike.position.z, frameDt);
       }
       this.followCam.update(this.bike, frameDt);
       this.audio.setEngine(

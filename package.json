@@ -1,15 +1,14 @@
 {
-  "name": "wukali-dirt",
+  "name": "horizon-ride",
   "version": "0.1.0",
-  "description": "Lightweight Android-first 3D endless dirt bike game (Phase 1 prototype)",
+  "description": "Horizon Ride \u2014 Android-first 3D dirt bike game (Phase 1A foundation)",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test:e2e": "node tests/e2e.cjs",
-    "test:signatures": "node tests/signature-tour.cjs"
+    "test:e2e": "node tests/e2e.cjs"
   },
   "repository": {
     "type": "git",

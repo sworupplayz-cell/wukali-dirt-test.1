@@ -15,5 +15,8 @@ export default defineConfig({
   },
   build: {
     target: 'es2019',
+    // Single-bundle game; three.js alone is ~450 kB minified. No code-split
+    // benefit for a game that needs everything at startup.
+    chunkSizeWarningLimit: 600,
   },
 });

@@ -21,9 +21,6 @@ export class UI {
     this.distance = $('distance');
     this.score = $('score');
     this.stuntToast = $('stunt-toast');
-    this.trialHud = $('trial-hud');
-    this.discoveryToast = $('discovery-toast');
-    this.summitBanner = $('summit-banner');
     this.toast = $('toast');
 
     // Main menu
@@ -163,91 +160,6 @@ export class UI {
     game.onStateChange = (s) => this._applyState(s);
     this._applyState(game.state);
 
-    // Summit banner (one reused node; event-driven).
-    game.onSummit = (res) => {
-      // Names carrying a Nepali mountain word need no "Mount" prefix.
-      const hasSuffix = /(Shikhar|Chuli|Danda|Himal|Peak|Crown)$/.test(res.name);
-      $('sb-name').textContent = hasSuffix ? res.name : `Mount ${res.name}`;
-      $('sb-ach').textContent = res.meta.length
-        ? `\u{1F3C6} ${res.meta.join(' \u00B7 ')}`
-        : `\u{1F3C6} Mountain Conquered (${game.achievements.summitCount})`;
-      this.summitBanner.classList.add('show');
-      clearTimeout(this._summitTimer);
-      this._summitTimer = setTimeout(() => this.summitBanner.classList.remove('show'), 3800);
-    };
-
-    // ---- Time trials (Phase 3K-1) -------------------------------------------
-    const fmtT = (t) => {
-      const m = Math.floor(t / 60), s = t - m * 60;
-      return `${m}:${s.toFixed(1).padStart(4, '0')}`;
-    };
-    this._trialPromptT = 0;
-    game.trials.onEvent = (type, p) => {
-      clearTimeout(this._trialHideT);
-      if (type === 'prompt') {
-        // Shown only while idle and near a gate (re-fired by the 2 Hz scan).
-        if (game.trials.state === 'idle') {
-          this.trialHud.textContent = `\u23F1 ${p.name} TIME TRIAL \u2014 ride through the gate`;
-          this.trialHud.classList.add('show');
-          this._trialHideT = setTimeout(() => this.trialHud.classList.remove('show'), 1600);
-        }
-      } else if (type === 'start') {
-        this.trialHud.classList.add('show');
-      } else if (type === 'checkpoint') {
-        this.trialHud.classList.add('show');
-      } else if (type === 'finish') {
-        const extra = p.meta ? ` \u00B7 \u{1F3C6} ${p.meta}` : (p.first ? '' : p.improved ? ' \u00B7 NEW BEST' : ` \u00B7 best ${fmtT(p.best)}`);
-        this.trialHud.textContent = `\u{1F3C1} ${p.name} \u2014 ${fmtT(p.time)}${extra}`;
-        this.trialHud.classList.add('show');
-        this._trialHideT = setTimeout(() => this.trialHud.classList.remove('show'), 5000);
-      } else if (type === 'abort') {
-        this.trialHud.textContent = `TRIAL OVER \u2014 ${p.reason}`;
-        this.trialHud.classList.add('show');
-        this._trialHideT = setTimeout(() => this.trialHud.classList.remove('show'), 2200);
-      }
-    };
-
-    // Nature discovery toast (Phase 3K-2).
-    game.onDiscover = (d) => {
-      const icon = d.type === 'lake' ? '\u{1F30A}' : d.type === 'wf' ? '\u{1F4A7}'
-        : d.type === 'village' ? '\u{1F3D8}\uFE0F' : d.type === 'town' ? '\u{1F3EA}'
-        : d.type === 'city' ? '\u{1F3D9}\uFE0F' : d.type === 'industry' ? '\u{1F3ED}'
-        : d.type === 'stadium' ? '\u{1F3DF}\uFE0F' : '\u{1F3D4}\uFE0F';
-      this.discoveryToast.textContent =
-        `${icon} DISCOVERED \u00B7 ${d.name}${d.meta ? ` \u00B7 \u{1F3C6} ${d.meta}` : ''}`;
-      this.discoveryToast.classList.add('show');
-      clearTimeout(this._discT);
-      this._discT = setTimeout(() => this.discoveryToast.classList.remove('show'), 3500);
-    };
-
-    // Challenge events (Phase 3K-3) share the trial pill; a running
-    // mountain trial keeps display priority.
-    game.challenges.onEvent = (type, p) => {
-      if (game.trials.state === 'running') return;
-      clearTimeout(this._trialHideT);
-      if (type === 'prompt') {
-        const label = p.kind === 'sz' ? `\u{1F3AA} STUNT ZONE \u00B7 ${p.name} \u2014 ride in and go big!`
-          : p.kind === 'or' ? `\u{1F98F} OFF-ROAD \u00B7 ${p.name} (${p.len} m) \u2014 ride through the flag`
-          : `\u{1F332} TRAIL \u00B7 ${p.name} \u2014 ride through the flag`;
-        this.trialHud.textContent = label;
-        this.trialHud.classList.add('show');
-        this._trialHideT = setTimeout(() => this.trialHud.classList.remove('show'), 1800);
-      } else if (type === 'start' || type === 'cp') {
-        this.trialHud.classList.add('show');
-      } else if (type === 'finish') {
-        const extra = p.meta ? ` \u00B7 \u{1F3C6} ${p.meta}` : p.improved && !p.first ? ' \u00B7 NEW BEST' : '';
-        this.trialHud.textContent = p.score !== undefined
-          ? `\u{1F3AA} ${p.rec.name} \u2014 +${p.score} PTS${extra}`
-          : `\u{1F3C1} ${p.rec.name} \u2014 ${fmtT(p.time)}${extra}`;
-        this.trialHud.classList.add('show');
-        this._trialHideT = setTimeout(() => this.trialHud.classList.remove('show'), 5000);
-      } else if (type === 'fail') {
-        this.trialHud.textContent = `CHALLENGE OVER \u2014 ${p.reason}`;
-        this.trialHud.classList.add('show');
-        this._trialHideT = setTimeout(() => this.trialHud.classList.remove('show'), 2200);
-      }
-    };
-
     // HUD readouts: update at 5 Hz, not per frame (avoids DOM churn).
     setInterval(() => {
       if (game.state !== State.PLAYING && game.state !== State.CRASHED) return;
@@ -259,22 +171,6 @@ export class UI {
       this.speedo.innerHTML = `${Math.round(ms * 3.6)} <span>km/h</span>`;
       this.distance.textContent = fmtDist(game.run.distance);
       this.score.textContent = game.stunts.score > 0 ? `${game.stunts.score} PTS` : '';
-      // Running trial: live timer + checkpoint progress (same 5 Hz tick).
-      if (game.trials.state === 'running') {
-        const tr = game.trials;
-        const cp = Math.min(tr.cpIndex, tr.cpTotal());
-        this.trialHud.textContent = tr.cpIndex < tr.cpTotal()
-          ? `\u23F1 ${fmtT(tr.time)} \u00B7 CP ${cp}/${tr.cpTotal()}`
-          : `\u23F1 ${fmtT(tr.time)} \u00B7 TO THE SUMMIT!`;
-      } else if (game.challenges.active) {
-        const a = game.challenges.active;
-        this.trialHud.textContent = a.kind === 'sz'
-          ? `\u{1F3AA} STUNT ZONE ${Math.ceil(a.t)}s \u00B7 +${game.stunts.score - a.score0} PTS`
-          : a.kind === 'or'
-            ? `\u23F1 ${fmtT(a.t)} \u00B7 TO THE FINISH`
-            : `\u23F1 ${fmtT(a.t)} \u00B7 CP ${a.cp}/${a.rec.cps.length}`;
-        this.trialHud.classList.add('show');
-      }
     }, 200);
   }
 
@@ -288,9 +184,7 @@ export class UI {
     if (s === State.PLAYING || s === State.MENU) {
       this.stuntToast.classList.remove('show');
       this.comboHud.classList.remove('show');
-      this.trialHud.classList.remove('show');
     }
-    if (s === State.MENU) this.summitBanner.classList.remove('show');
   }
 
   _fillGameOver() {

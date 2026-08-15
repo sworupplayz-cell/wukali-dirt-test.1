@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="theme-color" content="#7ec4e8" />
-  <title>Wukali Dirt</title>
+  <title>Horizon Ride</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
     html, body { width: 100%; height: 100%; overflow: hidden; background: #7ec4e8; touch-action: none;
@@ -149,36 +149,9 @@
       white-space: nowrap; z-index: 15; }
     #combo-hud .ch { color: #ffe082; font-size: 1.2em; }
     #combo-hud .ct { color: #fff; }
-    /* Time trial HUD (Phase 3K-1): one small pill, top-center */
-    #trial-hud { position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
-      background: rgba(0,0,0,0.5); color: #ffe082; font-weight: 800; font-size: clamp(12px, 2.8vmin, 16px);
-      letter-spacing: 0.5px; padding: 7px 14px; border-radius: 999px; pointer-events: none;
-      opacity: 0; transition: opacity 0.2s; white-space: nowrap; z-index: 15; }
-    #trial-hud.show { opacity: 1; }
-    /* Nature discovery toast (Phase 3K-2) */
-    #discovery-toast { position: fixed; top: 52px; left: 50%; transform: translateX(-50%);
-      background: rgba(20, 60, 46, 0.72); color: #d7ffe3; font-weight: 800;
-      font-size: clamp(12px, 2.9vmin, 17px); letter-spacing: 0.5px; padding: 8px 16px;
-      border-radius: 999px; pointer-events: none; opacity: 0; transition: opacity 0.25s;
-      white-space: nowrap; z-index: 15; }
-    #discovery-toast.show { opacity: 1; }
     #combo-hud.show { opacity: 1; }
     #combo-hud.pop { transform: translate(-50%, 0) scale(1.12); }
     #combo-hud.show:not(.pop) { transform: translate(-50%, 0) scale(1); }
-
-    /* Summit banner: one reused node, transform/opacity only */
-    #summit-banner { position: fixed; top: 16%; left: 50%; pointer-events: none; z-index: 16;
-      transform: translate(-50%, 10px) scale(0.85); opacity: 0;
-      transition: transform 0.25s ease-out, opacity 0.25s ease-out;
-      text-align: center; padding: 14px 26px; border-radius: 16px;
-      background: rgba(18, 26, 20, 0.78); }
-    #summit-banner.show { transform: translate(-50%, 0) scale(1); opacity: 1; }
-    #summit-banner .sb-top { color: #b3e5fc; font-size: clamp(13px, 2.8vmin, 17px);
-      font-weight: 700; letter-spacing: 2px; }
-    #summit-banner .sb-name { color: #fff; font-size: clamp(22px, 5vmin, 34px);
-      font-weight: 900; margin: 2px 0; text-shadow: 0 2px 0 rgba(0,0,0,0.4); }
-    #summit-banner .sb-ach { color: #ffca28; font-size: clamp(14px, 3vmin, 19px);
-      font-weight: 700; }
 
     .stats { display: grid; grid-template-columns: auto auto; gap: 4px 22px;
       margin: 4px 0 10px; font-size: clamp(14px, 3vmin, 19px); color: #cfd8dc; }
@@ -201,8 +174,8 @@
   <!-- Main menu -->
   <div id="menu-overlay" class="overlay">
     <div class="panel">
-      <div class="title">WUKALI DIRT</div>
-      <div class="subtitle">Off-road dirt bike &mdash; Phase 1 prototype</div>
+      <div class="title">HORIZON RIDE</div>
+      <div class="subtitle">Off-road dirt bike &mdash; foundation build</div>
       <button class="menu-btn" id="btn-play">PLAY</button>
       <button class="menu-btn secondary" id="btn-music">MUSIC: ON</button>
       <button class="menu-btn secondary" id="btn-settings">SETTINGS</button>
@@ -286,13 +259,6 @@
     <div id="score"></div>
     <div id="stunt-toast"></div>
     <div id="combo-hud"></div>
-    <div id="trial-hud"></div>
-    <div id="discovery-toast"></div>
-    <div id="summit-banner">
-      <div class="sb-top">&#127956;&#65039; SUMMIT REACHED</div>
-      <div class="sb-name" id="sb-name"></div>
-      <div class="sb-ach" id="sb-ach"></div>
-    </div>
     <div class="ctl" id="btn-left"   data-control="left">&#9664;</div>
     <div class="ctl" id="btn-right"  data-control="right">&#9654;</div>
     <div id="handlebar" class="hidden"><div class="hb-bar"></div><div class="hb-grip l"></div><div class="hb-grip r"></div><div class="hb-stem"></div></div>
