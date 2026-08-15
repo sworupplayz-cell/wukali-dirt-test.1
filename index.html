@@ -163,6 +163,17 @@
     .crash-msg { color: #ff7043; font-size: clamp(26px, 6vmin, 42px); font-weight: 800;
       text-shadow: 0 3px 0 rgba(0,0,0,0.4); margin-bottom: 4px; }
 
+    /* Phase 1B: developer overlay (F3 / DBG button) */
+    #debug-overlay { position: fixed; top: calc(14px + clamp(18px, 4vmin, 26px) * 2.8);
+      left: max(14px, env(safe-area-inset-left)); z-index: 18; pointer-events: none;
+      background: rgba(0, 0, 0, 0.62); color: #9cff9c; font-family: 'Consolas', 'Courier New', monospace;
+      font-size: clamp(11px, 2.2vmin, 14px); font-weight: 600; line-height: 1.45;
+      padding: 8px 12px; border-radius: 8px; white-space: pre; }
+    #btn-debug { top: calc(10px + clamp(46px, 9vmin, 60px) + 8px); right: max(12px, env(safe-area-inset-right));
+      width: clamp(46px, 9vmin, 60px); height: clamp(30px, 5.4vmin, 36px);
+      font-size: clamp(10px, 2vmin, 12px); border-radius: 10px; font-weight: 800; opacity: 0.55; }
+    #btn-debug.on { opacity: 1; color: #9cff9c; }
+
     #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
       background: rgba(0,0,0,0.75); color: #fff; padding: 10px 18px; border-radius: 10px;
       font-size: 14px; z-index: 40; transition: opacity 0.4s; opacity: 0; pointer-events: none; }
@@ -270,7 +281,11 @@
     <div class="ctl" id="btn-pause">&#10074;&#10074;</div>
     <div class="ctl" id="btn-reset">&#8634;</div>
     <div class="ctl" id="btn-pov">POV</div>
+    <div class="ctl" id="btn-debug">DBG</div>
   </div>
+
+  <!-- Developer overlay (Phase 1B): toggled by F3 or the DBG button -->
+  <div id="debug-overlay" class="hidden"></div>
 
   <div id="toast"></div>
 

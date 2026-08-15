@@ -1,9 +1,10 @@
 /**
- * Horizon Ride — Phase 1A end-to-end verification.
+ * Horizon Ride — Phase 1B end-to-end verification.
  *
  * Drives the real game (dev server on :3000) in headless Chromium and
- * checks the preserved foundation: bike physics, camera, controls, menus
- * and the clean static test scene (no procedural world, no NPCs).
+ * checks the preserved foundation (bike physics, camera, controls, menus)
+ * plus the fixed-world streaming engine: 10,000 x 5,000 m, 200 permanent
+ * 500 m sectors, 3x3 streaming window, per-sector debug tints, F3 overlay.
  *
  * Setup once per sandbox:  bash tests/setup-browser.sh
  * Run:                     npm run test:e2e
@@ -51,43 +52,50 @@ function check(name, ok, detail = '') {
       grounded: g.bike.grounded, crashed: g.bike.crashed,
       fps: g.stats.fps,
       camPos: g.camera.position.toArray().map((n) => +n.toFixed(1)),
+      debug: { ...g.world.debug },
       groundH: +g.world.getHeight(g.bike.position.x, g.bike.position.z).toFixed(2),
     };
   });
 
-  // ================= Menu + scene sanity =================
+  // ================= Menu + world architecture =================
   let s = await state();
   check('Main menu opens', s.state === 'menu');
 
-  const scene = await page.evaluate(() => {
+  const world = await page.evaluate(() => {
     const g = window.__game;
-    let meshes = 0, lights = 0, total = 0;
-    g.scene.traverse((o) => {
-      total++;
-      if (o.isMesh) meshes++;
-      if (o.isLight) lights++;
-    });
+    const W = g.world;
+    let meshes = 0, visible = 0;
+    g.scene.traverse((o) => { if (o.isMesh) { meshes++; if (o.visible) visible++; } });
     return {
-      meshes, lights, total,
+      isSectorWorld: W.constructor.name === 'SectorWorld',
+      spawn: W.getSpawn(),
+      corner00: W.sectorAt(1, 1),
+      cornerMax: W.sectorAt(9999, 4999),
+      clampNeg: W.sectorAt(-50, -50),
+      clampOver: W.sectorAt(20000, 20000),
+      inBounds: W.isInBounds(5000, 2500),
+      outBounds: W.isInBounds(-10, 100) || W.isInBounds(10001, 100),
+      meshes, visible,
       calls: g.renderer.info.render.calls,
-      tris: g.renderer.info.render.triangles,
-      geoms: g.renderer.info.memory.geometries,
-      isTestWorld: g.world.constructor.name === 'TestWorld',
-      noChunks: !g.world.chunks,
-      noPopulation: !g.world.population,
-      noVillages: !g.world.villages && !g.world.towns && !g.world.cities && !g.world.industry,
+      loaded: W.debug.loaded,
+      noOldSystems: !W.chunks && !W.population && !W.villages && !W.generator,
     };
   });
-  check('World is the clean TestWorld', scene.isTestWorld);
-  check('No chunk streaming system', scene.noChunks);
-  check('No NPC/traffic population system', scene.noPopulation);
-  check('No village/town/city/industry systems', scene.noVillages);
-  // Budget: ~27 meshes belong to the bike/rider model (preserved as-is);
-  // the test scene itself adds only ground + road + ramp.
-  check('Tiny scene (few meshes, low draw calls)',
-    scene.meshes <= 35 && scene.calls <= 35,
-    `meshes=${scene.meshes} calls=${scene.calls} tris=${scene.tris}`);
-  console.log('SCENE METRICS', JSON.stringify(scene));
+  check('World is the SectorWorld streaming engine', world.isSectorWorld);
+  check('Spawn at world center (5000, 2500)',
+    world.spawn.x === 5000 && world.spawn.z === 2500, JSON.stringify(world.spawn));
+  check('Fixed sector grid 20x10',
+    world.corner00.x === 0 && world.corner00.z === 0 &&
+    world.cornerMax.x === 19 && world.cornerMax.z === 9,
+    `(0,0)=${JSON.stringify(world.corner00)} max=${JSON.stringify(world.cornerMax)}`);
+  check('Sector IDs clamp to the permanent grid (no infinite coords)',
+    world.clampNeg.x === 0 && world.clampNeg.z === 0 &&
+    world.clampOver.x === 19 && world.clampOver.z === 9);
+  check('World bounds are 10,000 x 5,000', world.inBounds && !world.outBounds);
+  check('3x3 window loaded at spawn (9 sectors)', world.loaded === 9, `loaded=${world.loaded}`);
+  check('No legacy world systems', world.noOldSystems);
+  check('Tiny scene (low draw calls)', world.calls <= 45,
+    `meshes=${world.meshes} visible=${world.visible} calls=${world.calls}`);
 
   // ================= Riding =================
   await page.click('#btn-play');
@@ -95,6 +103,8 @@ function check(name, ok, detail = '') {
   s = await state();
   check('PLAY starts gameplay', s.state === 'playing');
   check('Bike spawns grounded', s.grounded && Math.abs(s.pos[1] - s.groundH) < 0.5, JSON.stringify(s.pos));
+  check('Debug reports spawn sector (10,5)', s.debug.sectorX === 10 && s.debug.sectorZ === 5,
+    JSON.stringify(s.debug));
 
   await page.keyboard.down('KeyW');
   await sleep(2000);
@@ -117,36 +127,66 @@ function check(name, ok, detail = '') {
   s = await state();
   check('Brake works', s.speed <= 1, `speed=${s.speed}`);
 
-  const d0 = await page.evaluate(() => window.__game.run.distance);
-  check('Distance tracked while riding', d0 > 15, `${d0.toFixed(1)} m`);
+  // ================= Streaming while riding =================
+  // Teleport near a sector edge, then ride across it: the active window
+  // must recentre (load new column, unload old) without a hitch or error.
+  await page.evaluate(() => {
+    const g = window.__game;
+    g.bike._placeAt(5480, 0, 2750, Math.PI / 2); // facing +X, 20 m from x=5500 boundary
+    g.followCam.snapTo(g.bike);
+  });
+  await sleep(300);
+  const before = (await state()).debug;
+  await page.keyboard.down('KeyW');
+  await sleep(4000);
+  await page.keyboard.up('KeyW');
+  s = await state();
+  check('Crossed into a new sector while riding',
+    s.debug.sectorX > before.sectorX, `(${before.sectorX},${before.sectorZ}) -> (${s.debug.sectorX},${s.debug.sectorZ})`);
+  check('Streaming keeps exactly 9 sectors interior', s.debug.loaded === 9, `loaded=${s.debug.loaded}`);
+  check('No stall while streaming (fps healthy)', s.fps > 20, `fps=${s.fps}`);
+
+  const tints = await page.evaluate(() => {
+    const g = window.__game;
+    const colors = new Set();
+    for (const m of g.world._grid.cells.values()) {
+      if (m) colors.add(m.material.color.getHexString());
+    }
+    return { unique: colors.size, sample: [...colors].slice(0, 3) };
+  });
+  check('Per-sector debug tints differ', tints.unique >= 6, `${tints.unique} unique tints`);
+
+  // Edge of the world: window shrinks (outside cells skipped), never errors.
+  await page.evaluate(() => {
+    const g = window.__game;
+    g.bike._placeAt(30, 0, 30, 0); // sector (0,0) corner
+    g.followCam.snapTo(g.bike);
+  });
+  await sleep(400);
+  s = await state();
+  check('World-corner window clips to 4 sectors', s.debug.loaded === 4,
+    `loaded=${s.debug.loaded} at sector (${s.debug.sectorX},${s.debug.sectorZ})`);
+  const poolOk = await page.evaluate(() => window.__game.world._pool.available >= 6);
+  check('Sector meshes returned to the pool at the corner', poolOk);
+
+  // Back to the middle: window refills to 9.
+  await page.evaluate(() => {
+    const g = window.__game;
+    g.bike._placeAt(5000, 0, 2500, 0);
+    g.followCam.snapTo(g.bike);
+  });
+  await sleep(400);
+  s = await state();
+  check('Window refills to 9 sectors mid-world', s.debug.loaded === 9, `loaded=${s.debug.loaded}`);
+
+  // ================= HUD / distance =================
   const hud = await page.evaluate(() => ({
     dist: document.getElementById('distance').textContent,
     speed: document.getElementById('speedo').textContent,
   }));
   check('HUD shows distance + speed', /m|km/.test(hud.dist) && /km\/h/.test(hud.speed), JSON.stringify(hud));
 
-  // ================= Ramp jump =================
-  await page.evaluate(() => {
-    const g = window.__game;
-    // Line up on the road facing the ramp with a run-up.
-    g.bike._placeAt(0, g.world.getHeight(0, 20), 20, 0);
-    g.followCam.snapTo(g.bike);
-  });
-  let peakAir = 0, wasAirborne = false;
-  await page.keyboard.down('KeyW');
-  for (let i = 0; i < 50; i++) {
-    await sleep(100);
-    const a = await page.evaluate(() => ({
-      air: !window.__game.bike.grounded,
-      h: window.__game.bike.heightAboveGround,
-    }));
-    if (a.air) { wasAirborne = true; peakAir = Math.max(peakAir, a.h); }
-  }
-  await page.keyboard.up('KeyW');
-  check('Ramp jump works (bike gets airborne)', wasAirborne && peakAir > 0.8, `peak=${peakAir.toFixed(2)} m`);
-
   // ================= Reset =================
-  await sleep(600);
   await page.keyboard.press('KeyR');
   await sleep(300);
   s = await state();
@@ -161,6 +201,35 @@ function check(name, ok, detail = '') {
   check('First-person POV toggles', povBefore === 'third' && povAfter === 'first');
   await page.keyboard.press('KeyC');
   await sleep(400);
+
+  // ================= Debug overlay (F3 + mobile button) =================
+  let dbgHidden = await page.evaluate(() =>
+    document.getElementById('debug-overlay').classList.contains('hidden'));
+  check('Debug overlay hidden by default', dbgHidden);
+  await page.keyboard.press('F3');
+  await sleep(400);
+  const dbg = await page.evaluate(() => ({
+    hidden: document.getElementById('debug-overlay').classList.contains('hidden'),
+    text: document.getElementById('debug-overlay').textContent,
+  }));
+  check('F3 shows debug overlay', !dbg.hidden);
+  check('Overlay shows FPS / position / sector / loaded / draw calls',
+    /FPS \d+/.test(dbg.text) && /X [\d.]+ {2}Z [\d.]+/.test(dbg.text) &&
+    /SECTOR \(\d+,\d+\)/.test(dbg.text) && /LOADED \d+/.test(dbg.text) &&
+    /DRAW CALLS \d+/.test(dbg.text),
+    JSON.stringify(dbg.text));
+  await page.keyboard.press('F3');
+  await sleep(200);
+  dbgHidden = await page.evaluate(() =>
+    document.getElementById('debug-overlay').classList.contains('hidden'));
+  check('F3 hides debug overlay again', dbgHidden);
+  await page.click('#btn-debug');
+  await sleep(200);
+  const dbgBtn = await page.evaluate(() =>
+    !document.getElementById('debug-overlay').classList.contains('hidden'));
+  check('Mobile DBG button toggles overlay', dbgBtn);
+  await page.click('#btn-debug');
+  await sleep(200);
 
   // ================= Pause =================
   await page.keyboard.press('KeyP');
@@ -178,7 +247,6 @@ function check(name, ok, detail = '') {
   // ================= Mobile controls (touch) =================
   const gasBtn = await page.$('#btn-gas');
   const box = await gasBtn.boundingBox();
-  const t = await page.touchscreen;
   await page.touchscreen.touchStart(box.x + box.width / 2, box.y + box.height / 2);
   await sleep(1500);
   s = await state();

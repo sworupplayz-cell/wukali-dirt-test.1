@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { TestWorld } from '../world/TestWorld.js';
+import { SectorWorld } from '../world/SectorWorld.js';
 import { Bike } from '../bike/Bike.js';
 import { BikeModel } from '../bike/BikeModel.js';
 import { Input } from './Input.js';
@@ -36,8 +36,9 @@ export class Game {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(68, 1, 0.1, 800);
 
-    // Horizon Ride Phase 1A: one static test scene — no procedural world.
-    this.world = new TestWorld(this.scene);
+    // Horizon Ride Phase 1B: fixed 10,000 x 5,000 m world, 200 permanent
+    // 500 m sectors, 3x3 streaming window around the bike.
+    this.world = new SectorWorld(this.scene);
     this.bike = new Bike(this.world);
     this.bikeModel = new BikeModel(this.scene);
     this.followCam = new FollowCamera(this.camera, this.world);
@@ -171,6 +172,9 @@ export class Game {
     const simulating = this.state === State.PLAYING || this.state === State.CRASHED;
     this.input.enabled = this.state === State.PLAYING;
     this.input.update();
+
+    // Stream sectors around the bike (also in the menu, for the backdrop).
+    this.world.update(this.bike.position);
 
     if (simulating) {
       this._accumulator = Math.min(this._accumulator + frameDt, FIXED_DT * MAX_STEPS);

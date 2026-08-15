@@ -2,13 +2,13 @@
 
 A lightweight, Android-first, 3D off-road dirt-bike game.
 
-**Current status: Phase 1A — Project reset.** The experimental
-Wukali-Dirt endless-world prototype has been cleaned down to its permanent
-foundation: the bike, its physics, the cameras, the controls, the menus and
-the rendering pipeline — riding in a tiny static test scene. All procedural
-world generation (terrain, biomes, villages, towns, cities, industry, NPCs,
-traffic, trials, discoveries) has been removed. Future Horizon Ride phases
-build on this foundation.
+**Current status: Phase 1B — Fixed world streaming engine.** The game now
+runs on a PERMANENT, FINITE world: 10,000 m x 5,000 m (50 km^2) divided into
+200 fixed 500 m sectors (20 columns x 10 rows). A 3x3 sector window streams
+around the bike with pooled meshes — no loading screens, no infinite
+coordinates. Sectors are flat placeholder planes with per-sector debug tints
+(terrain content arrives in later phases). A developer overlay (F3 / DBG
+button) shows FPS, position, current sector, loaded sectors and draw calls.
 
 ## Tech
 
@@ -37,22 +37,25 @@ npm run build    # production build -> dist/
 | POV toggle  | POV (top right)      | C                 |
 | Reset bike  | ↺ (top right)        | R                 |
 | Pause       | ⏸ (top right)        | Esc or P          |
+| Debug HUD   | DBG (right edge)     | F3                |
 
 Steering modes (Settings): buttons, virtual handlebar, tilt, swipe.
 
 ## Architecture
 
-World (Phase 1A test scene):
+World (Phase 1B streaming engine):
 
-- `src/world/TestWorld.js` — the entire world: an analytic heightfield
-  (flat ground + one ramp wedge) implementing the sampling interface the bike
-  consumes — `{ getHeight, getNormal, getColliders, getSurface,
-  getRenderedPlane, getSpawn, isInBounds, update }` — plus a dirt test road,
-  sky, fog and one sun light. No generation, no per-frame work.
-- `src/world/streaming/ObjectPool.js` — neutral fixed-capacity object pool
-  (retained streaming architecture; dormant until future phases use it).
-- `src/world/streaming/ChunkGrid.js` — neutral sector/chunk bookkeeping with
-  enter/leave deltas (retained streaming architecture; dormant).
+- `src/world/SectorWorld.js` — the fixed world: permanent 20x10 sector grid
+  (500 m sectors, IDs (0,0)..(19,9)), 3x3 streaming window, pooled flat
+  sector planes with deterministic debug tints, sky/fog/sun. Implements the
+  sampling interface the bike consumes — `{ getHeight, getNormal,
+  getColliders, getSurface, getRenderedPlane, getSpawn, isInBounds, update }`.
+  Spawn is the exact world center (5000, 2500). Riding off the world edge
+  triggers the bike's existing safe-spot reset (no invisible walls).
+- `src/world/streaming/ChunkGrid.js` — sector window bookkeeping with
+  enter/leave deltas (drives the 3x3 streaming).
+- `src/world/streaming/ObjectPool.js` — fixed-capacity mesh pool
+  (sector load/unload never allocates).
 
 Game core (preserved foundation):
 
@@ -72,6 +75,8 @@ Game core (preserved foundation):
 - `src/core/StuntTracker.js` — trick detection/scoring/combos from bike state.
 - `src/core/GameAudio.js` — synthesized engine + optional music (no assets).
 - `src/ui/UI.js`, `src/ui/HudEditor.js` — DOM overlays + HUD layout editor.
+- `src/ui/DebugOverlay.js` — developer overlay (F3 / DBG button): FPS,
+  player X/Z, current sector, loaded sectors, draw calls.
 
 ## Tests
 

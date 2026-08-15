@@ -1,5 +1,6 @@
 import { State } from '../core/Game.js';
 import { HudEditor } from './HudEditor.js';
+import { DebugOverlay } from './DebugOverlay.js';
 
 /**
  * UI — wires the HTML overlays (menu / pause / crash / HUD) to the game.
@@ -159,6 +160,9 @@ export class UI {
 
     game.onStateChange = (s) => this._applyState(s);
     this._applyState(game.state);
+
+    // Developer overlay (Phase 1B): F3 or the DBG button.
+    this.debugOverlay = new DebugOverlay(game);
 
     // HUD readouts: update at 5 Hz, not per frame (avoids DOM churn).
     setInterval(() => {
