@@ -1,45 +1,54 @@
 import { vnoise, fbm2, hash01, sstep } from './noise.js';
+import { Landforms } from './Landforms.js';
 
 /**
- * TerrainField — Horizon Ride Phase 2 analytic terrain foundation.
+ * TerrainField — Horizon Ride analytic terrain (Phase 2 foundation +
+ * Phase 3 major landforms).
  *
  * A pure deterministic function of WORLD coordinates (x, z): every sample
  * anywhere in the 10,000 x 5,000 m world returns the same height forever,
  * regardless of sector load order. Sector meshes only SAMPLE this field on
- * a global 4 m lattice, so sector borders match bit-for-bit — seamless by
+ * a global lattice, so sector borders match bit-for-bit — seamless by
  * construction, no stitching, no cracks.
  *
- * Terrain content (this phase only — no mountains, cliffs, rivers, props):
- *   - wide plains & rolling valleys  (λ ~1100 m, ±16 m)
- *   - gentle hills                   (λ ~300 m,  ±7 m)
- *   - soft ridge lines               (λ ~550 m,  +8 m, region-masked)
- *   - small natural bumps            (λ ~30 m,   ±0.5 m, cancelled on trails)
- *   - medium jump mounds             (r ~11 m, 1.2–2.2 m, placed ON trails
- *                                     plus a sparse scatter in open fields)
- *   - a dirt trail network           (wandering north-south + east-west
- *                                     corridors that FOLLOW the terrain —
- *                                     worn 0.2 m into the ground, smoother
- *                                     and grippier than open country)
+ * Composition (lowlands -> continent):
+ *   1. Phase 2 rolling base: plains, valleys, gentle hills, soft local
+ *      ridges, bumps, trail kickers — the riding fabric of the lowlands.
+ *   2. Phase 3 Landforms: 4 connected ridge chains carrying 18 unique
+ *      named peaks (highest ~4600 m), saddles between every neighboring
+ *      pair, 12 switchback pass roads, 6 U-valleys + 8 V-valleys, 6
+ *      basins (lowest ~-120 m), 5 escarpments, and a spiral summit road.
+ *   3. Dirt trail network (Phase 2) masked OFF the mountains — lowland
+ *      trails end at the foothills; pass roads take over from there.
+ *
+ * Roads are blended after valleys/mountains so they always ride ON the
+ * final surface; their centerline elevations were sampled from the raw
+ * field once at startup and smoothed to a rideable grade.
  */
 
 const SEED = 1214;
 
-// Trail corridors. NS trails run the full 5 km depth, EW trails the full
-// 10 km width; both wander with two incommensurate sines so crossings are
-// varied but 100% deterministic.
+// Trail corridors (Phase 2 lowland network).
 const NS_SPACING = 800, NS_BASE = 400, NS_COUNT = 12; // x = 400..9200
 const EW_SPACING = 700, EW_BASE = 350, EW_COUNT = 7;  // z = 350..4550
-const TRAIL_HALF = 3.4;   // full-grip core half-width (m)
-const TRAIL_FADE = 7.5;   // mask fades to 0 by this distance
+const TRAIL_HALF = 3.4;
+const TRAIL_FADE = 7.5;
 
-// Jump mounds along NS trails.
-const JUMP_SPACING = 190; // one candidate every ~190 m of trail
-const JUMP_L = 7;         // kicker half-length along the trail (m)
-const JUMP_W = 5;         // kicker half-width across the trail (m)
+// Jump kickers along NS trails.
+const JUMP_SPACING = 190;
+const JUMP_L = 7;
+const JUMP_W = 5;
+
+// Mountains rise above the rolling base starting at this contribution.
+const MTN_TRAIL_CUT0 = 60, MTN_TRAIL_CUT1 = 220; // lowland trails fade out
 
 export class TerrainField {
   constructor() {
-    this._info = { h: 0, trail: 0, moist: 0 };
+    this._info = { h: 0, trail: 0, moist: 0, mtn: 0 };
+    this._lf = { road: 0, vroad: 0 };
+    this.landforms = new Landforms();
+    // Cache pass/spiral road elevations from the ROAD-FREE field once.
+    this.landforms.initRoads((x, z) => this._rawHeight(x, z));
   }
 
   /** Physics height — the single source of truth. */
@@ -48,16 +57,16 @@ export class TerrainField {
   }
 
   /**
-   * Full sample: height + trail mask + moisture (for coloring).
+   * Full sample: height + trail mask + moisture + mountain factor.
    * `out` is caller-provided scratch; no allocations.
    */
   sample(x, z, out) {
-    // --- Base landforms -----------------------------------------------------
-    // Wide plains / rolling valleys.
+    const L = this._lf;
+    L.road = 0; L.vroad = 0;
+
+    // ---- Phase 2 rolling base ----------------------------------------------
     const plains = (fbm2(x * 0.00091, z * 0.00091, SEED) - 0.5) * 32;
-    // Gentle hills.
     const hills = (vnoise(x * 0.0033 + 13.7, z * 0.0033 - 7.1, SEED + 5) - 0.5) * 14;
-    // Soft ridge lines, only inside ridge regions (~1/3 of the world).
     const region = vnoise(x * 0.00058 + 91.2, z * 0.00058 + 40.6, SEED + 9);
     let ridge = 0;
     const rm = sstep(0.56, 0.78, region);
@@ -67,35 +76,65 @@ export class TerrainField {
       ridge = crest * crest * 8 * rm;
     }
 
-    // --- Trails --------------------------------------------------------------
-    const trail = this._trailMask(x, z);
+    // ---- Phase 3 major landforms ---------------------------------------------
+    const mtn = this.landforms.mountains(x, z);
+    const mtnN = sstep(MTN_TRAIL_CUT0, MTN_TRAIL_CUT1, mtn); // 0 lowland .. 1 alpine
 
-    // Small natural bumps — worn away on the trail surface.
-    const bumps = (vnoise(x * 0.034 + 3.3, z * 0.034 - 9.9, SEED + 21) - 0.5) *
-      1.1 * (1 - 0.85 * trail);
+    // Lowland fabric (trails, kickers, bumps) fades out on the massifs.
+    let trail = 0, bumps = 0, jump = 0;
+    if (mtnN < 1) {
+      trail = this._trailMask(x, z) * (1 - mtnN);
+      bumps = (vnoise(x * 0.034 + 3.3, z * 0.034 - 9.9, SEED + 21) - 0.5) *
+        1.1 * (1 - 0.85 * trail) * (1 - 0.7 * mtnN);
+      jump = this._jumpAt(x, z) * (1 - mtnN);
+    }
 
-    // Jump mounds (on trails + sparse field scatter).
-    const jump = this._jumpAt(x, z);
+    let h = plains + hills + ridge + mtn + bumps + jump;
+    h += this.landforms.basins(x, z);
+    h += this.landforms.escarpments(x, z);
+    h = this.landforms.carveValleys(x, z, h, L);
+    h = this.landforms.plateau(x, z, h);
+    h = this.landforms.roads(x, z, h, L); // roads ride ON the final surface
 
-    // Worn trail bed sits ~0.2 m into the ground.
-    let h = plains + hills + ridge + bumps + jump - 0.22 * trail;
+    // Roads count as trail surface (grip/color); valley trails too.
+    trail = Math.max(trail, L.road, L.vroad * 0.9);
+    h -= 0.22 * trail; // worn road bed
 
     out.h = h;
     out.trail = trail;
     out.moist = vnoise(x * 0.0024 + 71.3, z * 0.0024 + 17.9, SEED + 33);
+    out.mtn = mtnN;
     return out;
+  }
+
+  /** Road-free height used ONCE at startup to lay road centerlines. */
+  _rawHeight(x, z) {
+    const plains = (fbm2(x * 0.00091, z * 0.00091, SEED) - 0.5) * 32;
+    const hills = (vnoise(x * 0.0033 + 13.7, z * 0.0033 - 7.1, SEED + 5) - 0.5) * 14;
+    const region = vnoise(x * 0.00058 + 91.2, z * 0.00058 + 40.6, SEED + 9);
+    let ridge = 0;
+    const rm = sstep(0.56, 0.78, region);
+    if (rm > 0) {
+      const rv = vnoise(x * 0.0018 + 55.1, z * 0.0018 - 21.9, SEED + 13);
+      const crest = 1 - Math.abs(2 * rv - 1);
+      ridge = crest * crest * 8 * rm;
+    }
+    let h = plains + hills + ridge + this.landforms.mountains(x, z);
+    h += this.landforms.basins(x, z);
+    h += this.landforms.escarpments(x, z);
+    const L = { road: 0, vroad: 0 };
+    h = this.landforms.carveValleys(x, z, h, L);
+    return this.landforms.plateau(x, z, h);
   }
 
   /** Dirt-trail mask in [0,1]: 1 = trail core, 0 = open country. */
   _trailMask(x, z) {
-    // Nearest north-south corridor.
     let m = 0;
     const k = Math.round((x - NS_BASE) / NS_SPACING);
     if (k >= 0 && k < NS_COUNT) {
       const d = Math.abs(x - this.nsCenter(k, z));
       m = 1 - sstep(TRAIL_HALF, TRAIL_FADE, d);
     }
-    // Nearest east-west corridor.
     const j = Math.round((z - EW_BASE) / EW_SPACING);
     if (j >= 0 && j < EW_COUNT) {
       const d = Math.abs(z - this.ewCenter(j, x));
@@ -120,20 +159,11 @@ export class TerrainField {
   }
 
   /**
-   * Combined jump contribution at (x,z).
-   *
-   * Trail jumps are dirt KICKERS: a quadratic tent along the direction of
-   * travel — h = H*(1-|u|)^2 — smooth at the base but with a SHARP crest.
-   * The slope discontinuity at the crest is what actually launches the
-   * bike (the ground-follow physics never separates from a C1-smooth
-   * mound at rideable speeds: its curvature is far too low). Crest slope
-   * is 2H/L ≈ 0.35–0.63 — a medium jump, not a cliff.
-   *
-   * Open-field mounds stay C1-smooth quartic whoops: rhythm, not air.
+   * Combined jump contribution at (x,z). Trail kickers are quadratic
+   * tents (sharp crest -> real launches); field mounds stay C1-smooth.
    */
   _jumpAt(x, z) {
     let h = 0;
-    // Trail kickers: candidates along the nearest NS trail.
     const k = Math.round((x - NS_BASE) / NS_SPACING);
     if (k >= 0 && k < NS_COUNT) {
       const m = Math.round(z / JUMP_SPACING);
@@ -145,7 +175,7 @@ export class TerrainField {
           const cw = (x - xj) / JUMP_W;
           let w = 1 - cw * cw;
           if (w > 0) {
-            w *= w; // smooth quartic falloff across the trail
+            w *= w;
             const H = 1.2 + hash01(k, m, SEED + 43) * 1.0;
             const t = 1 - du;
             h += H * t * t * w;
@@ -153,7 +183,6 @@ export class TerrainField {
         }
       }
     }
-    // Sparse field mounds on a 160 m cell grid (natural whoops in the open).
     const cx = Math.floor(x / 160), cz = Math.floor(z / 160);
     if (hash01(cx, cz, SEED + 51) < 0.3) {
       const xf = (cx + 0.2 + hash01(cx, cz, SEED + 52) * 0.6) * 160;
@@ -164,10 +193,7 @@ export class TerrainField {
     return h;
   }
 
-  /**
-   * Nearest trail jump mound to (x,z) on NS trail k (tests/debug aid).
-   * Returns { x, z, h } or null.
-   */
+  /** Nearest trail jump kicker to (x,z) on the closest NS trail. */
   jumpNear(x, z) {
     const k = Math.round((x - NS_BASE) / NS_SPACING);
     if (k < 0 || k >= NS_COUNT) return null;

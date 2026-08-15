@@ -2,16 +2,19 @@
 
 A lightweight, Android-first, 3D off-road dirt-bike game.
 
-**Current status: Phase 2 — Seamless terrain foundation.** The fixed
-10,000 m x 5,000 m world (200 permanent 500 m sectors, 3x3 streaming window)
-now carries one seamless sculpted terrain: gentle hills, rolling valleys,
-soft ridge lines, wide plains, small natural bumps, dirt trail kickers and a
-deterministic dirt-trail network that follows the land. Height is a pure
-analytic function of world coordinates, so sector/tile borders are
-bit-identical — zero seams by construction — and physics never waits for a
-mesh. Bike feel was tuned for the rolling terrain (suspension, landing
-absorption, brake bite, steering attack). The F3 overlay adds terrain
-height, player altitude and slope.
+**Current status: Phase 3 — Major landforms.** The fixed 10,000 m x 5,000 m
+world is now a believable continent: 18 unique named peaks connected into 4
+ridge chains (Crown Range, Mistral Wall, Southern Teeth, Grey Spur — highest:
+Rajadhara Summit ~4600 m), 14 saddles of which 12 carry switchback pass
+roads, 6 U-shaped glacial troughs + 8 V-shaped gorges, 6 basins (lowest
+~-100 m), 5 escarpments, and a 5-loop spiral road to the highest summit's
+rideable plateau. All roads are grade-clamped by construction (max ~29%,
+hairpins near-level) and laid by a contour-aware switchback walker at
+startup — deterministic, no meshes, pure analytic field. A static far-LOD
+continent backdrop (4 draw calls) makes the ranges visible for kilometres;
+altitude palette bands (grass -> scrub -> rock -> snow) are shared between
+near tiles and the backdrop. F3 shows elevation, slope %, and the peak
+name/ID + range while on a massif.
 
 ## Tech
 
@@ -46,13 +49,22 @@ Steering modes (Settings): buttons, virtual handlebar, tilt, swipe.
 
 ## Architecture
 
-World (Phase 2 terrain foundation on the Phase 1B streaming engine):
+World (Phase 3 landforms on the Phase 2 foundation + Phase 1B streaming):
 
+- `src/world/Landforms.js` — the authored continental skeleton: 4 ridge
+  chains of named peaks with saddles, U/V valleys, basins, escarpments,
+  the summit plateau, and all mountain roads (contour-aware switchback
+  walker + spiral, grade-clamped, spatial-hash blended into the field).
 - `src/world/TerrainField.js` — the analytic ground truth: height, trail
-  mask and moisture as pure deterministic functions of world (x, z).
-  Plains/valleys, gentle hills, region-masked ridge lines, natural bumps,
-  sharp-crested dirt kickers on trails, smooth whoops in the open, and a
-  wandering NS/EW dirt-trail network worn 0.2 m into the ground.
+  mask, moisture and mountain factor as pure deterministic functions of
+  world (x, z). Composes the Phase 2 rolling lowlands with the Phase 3
+  landforms; lowland trails fade out at the foothills where pass roads
+  take over.
+- `src/world/FarTerrain.js` — static low-LOD continent backdrop: the whole
+  world sampled once at 62.5 m into 4 frustum-culled meshes (~25 k tris);
+  near-field fragments discarded under the streamed tiles.
+- `src/world/palette.js` — shared vertex-color altitude palette
+  (grass -> basin scrub -> alpine rock -> snow, roads always readable).
 - `src/world/TerrainTiles.js` — render layer: pooled 125 m terrain tiles
   (7x7 window, 32x32 quads on an exact-binary global lattice) rebuilt
   nearest-first 2-3/frame. Shared vertex-colored Lambert material, no

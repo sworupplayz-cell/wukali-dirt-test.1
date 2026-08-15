@@ -34,7 +34,8 @@ export class Game {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
 
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(68, 1, 0.1, 800);
+    // Far plane covers the Phase 3 continent backdrop (fog ends ~7 km).
+    this.camera = new THREE.PerspectiveCamera(68, 1, 0.1, 12000);
 
     // Horizon Ride Phase 1B: fixed 10,000 x 5,000 m world, 200 permanent
     // 500 m sectors, 3x3 streaming window around the bike.

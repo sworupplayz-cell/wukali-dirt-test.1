@@ -365,9 +365,13 @@ export class Bike {
     } else {
       dPitch = (throttle * 1.0 - brake * 1.45) * dt;
       this.airPitch += dPitch;
-      if (Math.abs(this.airPitch - dPitch) <= 1.0) {
-        // Gentle mode keeps the old +-1.0 clamp; never snap back mid-flip.
-        this.airPitch = THREE.MathUtils.clamp(this.airPitch, -1.0, 1.0);
+      if (Math.abs(this.airPitch - dPitch) <= 0.82) {
+        // Gentle mode clamps BELOW the crash-landing pitch (0.9): holding
+        // gas/brake through a long flight can attitude the bike but never
+        // by itself turn a clean landing into a crash (Phase 3 mountain
+        // drops are much longer than Phase 2 lowland hops). Deliberate
+        // TRICK rotations keep full risk. Never snap back mid-flip.
+        this.airPitch = THREE.MathUtils.clamp(this.airPitch, -0.82, 0.82);
       }
     }
     this.airPitchTravel += dPitch;

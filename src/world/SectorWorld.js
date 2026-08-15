@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { ChunkGrid } from './streaming/ChunkGrid.js';
 import { TerrainField } from './TerrainField.js';
 import { TerrainTiles, CELL } from './TerrainTiles.js';
+import { FarTerrain } from './FarTerrain.js';
 
 /**
  * SectorWorld — Horizon Ride fixed-world streaming engine.
@@ -41,6 +42,8 @@ export class SectorWorld {
     this.scene = scene;
     this.field = new TerrainField();
     this.tiles = new TerrainTiles(scene, this.field);
+    // Phase 3: static continent backdrop so the ranges read from anywhere.
+    this.far = new FarTerrain(scene, this.field);
     this._colliders = []; // no props this phase
     this._buildLighting(scene);
 
@@ -144,6 +147,11 @@ export class SectorWorld {
     return Math.hypot(hx, hz) / (2 * e);
   }
 
+  /** Peak record if (x,z) is inside a mountain massif, else null (F3). */
+  peakAt(x, z) {
+    return this.field.landforms.peakAt(x, z);
+  }
+
   // ---- Streaming ------------------------------------------------------------
 
   /** Per-frame: sector window (logical) + terrain tile window (render). */
@@ -177,7 +185,10 @@ export class SectorWorld {
   _buildLighting(scene) {
     const sky = new THREE.Color(0x7ec4e8);
     scene.background = sky;
-    scene.fog = new THREE.Fog(sky, 140, 400); // hides the tile-window edge
+    // Phase 3: fog opens up to ~7 km so the mountain ranges read as a
+    // continent; the near/far terrain handoff (385-437 m) hides inside
+    // the fog ramp's start.
+    scene.fog = new THREE.Fog(sky, 300, 7000);
     scene.add(new THREE.HemisphereLight(0xd4ebff, 0x7d6a44, 0.92));
     const sun = new THREE.DirectionalLight(0xffedc9, 1.22);
     sun.position.set(60, 90, 30);

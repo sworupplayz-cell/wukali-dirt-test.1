@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { ChunkGrid } from './streaming/ChunkGrid.js';
 import { ObjectPool } from './streaming/ObjectPool.js';
+import { colorFor } from './palette.js';
 
 /**
  * TerrainTiles (Phase 2) — sculpted terrain rendering for the fixed world.
@@ -41,7 +42,8 @@ export class TerrainTiles {
     this._pool = new ObjectPool(() => this._makeMesh(scene), POOL);
     this._grid = new ChunkGrid(TILE, RADIUS);
     this._queue = [];
-    this._info = { h: 0, trail: 0, moist: 0 };
+    this._info = { h: 0, trail: 0, moist: 0, mtn: 0 };
+    this._rgb = [0, 0, 0];
     // (RES+3)^2 height grid incl. 1-cell border for normals.
     this._hgrid = new Float32Array((RES + 3) * (RES + 3));
     this.built = 0; // debug counter
@@ -62,7 +64,10 @@ export class TerrainTiles {
     // Nearest-first incremental builds; drain faster under a backlog
     // (teleport/reset refills the whole window) so the world settles in
     // well under a second without ever stalling one frame for long.
-    const perFrame = this._queue.length > 10 ? 3 : 2;
+    // (Phase 3 field samples cost more — mountains/valleys/roads — so
+    // steady-state builds drop to 1/frame; riding crosses a 125 m tile
+    // boundary every ~4 s, far slower than 60 builds/s.)
+    const perFrame = this._queue.length > 10 ? 3 : 1;
     for (let n = 0; n < perFrame && this._queue.length > 0; n++) {
       let best = 0, bestD = Infinity;
       for (let i = 0; i < this._queue.length; i++) {
@@ -127,11 +132,10 @@ export class TerrainTiles {
           field.sample(wx, wz, info);
           h = info.h;
           const v = ((J - 1) * (RES + 1) + (I - 1)) * 3;
-          // Grass: dry olive -> lush green by moisture; dirt on trails.
-          const m = info.moist, t = info.trail;
-          let r = 0.52 - 0.20 * m, g = 0.60 - 0.10 * m, b = 0.30 - 0.06 * m;
-          r += (0.56 - r) * t; g += (0.44 - g) * t; b += (0.29 - b) * t;
-          col[v] = r; col[v + 1] = g; col[v + 2] = b;
+          // Shared Phase 3 palette: grass -> basin scrub -> rock -> snow,
+          // dirt roads on top (same bands as the far backdrop).
+          colorFor(info, this._rgb);
+          col[v] = this._rgb[0]; col[v + 1] = this._rgb[1]; col[v + 2] = this._rgb[2];
         }
         grid[J * G + I] = h;
         if (h < minH) minH = h;
