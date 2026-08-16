@@ -230,7 +230,7 @@ export class Props {
       field.sample(px, pz, info);
       const yaw = rng() * 6.28;
       const r = rng();
-      if (info.h < 58) continue;           // beach and seabed stay clean
+      if (info.h < 46) continue;           // beach and seabed stay clean
       if (info.trail > 0.25) continue;     // never on a road bed
       if (lf.roadDist(px, pz) < 6.5) continue;
       const e = 5;

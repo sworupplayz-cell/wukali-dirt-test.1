@@ -2,10 +2,10 @@
 
 A lightweight, Android-first, 3D off-road dirt-bike game.
 
-**Current status: Chapter 5 — Performance & relief.** The world has grown
+**Current status: Chapter 6 — Terrain rebuild.** The world has grown
 from 32 km2 to 40 km2 (8,000 x 5,000 m, 160 streamed sectors) with five
 distinct regions: Rider's Meadow in the center (spawn, lake, cabins),
-the Glacier Wall in the north (five 1,450-1,800 m peaks), the Volcanic
+the Glacier Wall in the north (five 820-1,290 m peaks), the Volcanic
 Highlands in the east (basalt, ember glints, Mount Ember caldera), Red
 Canyon in the west (a carved sandstone trench with strata banding) and
 the Coastal Cliffs in the south (black-sand beaches falling to a real
@@ -16,6 +16,8 @@ Road, Red Canyon Road, Caldera Road, Glacier Route, Meadow Loop) and 12
 hidden trails — every one connecting meaningful places, none ending
 randomly. 15 landmarks (lookouts, cabins, stone arches, prayer-flag
 hills, caves, rest areas) are all verified reachable on the bike by CI.
+Since Chapter 6 the land between those places is rolling 45-120 m
+country — valleys, ridges, benches and basins — instead of a high plain.
 The map has no invisible walls: the north is blocked by glacier faces,
 the south by the ocean, the east by volcanic cliffs and the west by
 canyon walls. Bike physics, the original FollowCamera and the streaming
@@ -47,6 +49,52 @@ camera, controls, UI, save data or graphics presets:
 - *A fuller world*: a clustered ground-detail scatter (stones, scree,
   spires — existing instanced models, zero extra draw calls) fills the
   space between landmarks.
+
+**Chapter 6 (this revision)** rebuilds TERRAIN GENERATION only — physics,
+camera, controls, UI, save data, streaming and the Chapter 5 performance
+work are untouched. The old field was a 115-325 m fBM plain with mountain
+skirts spilling right across the map: only 9% of the world sat in the
+0-120 m band, the mean elevation was 489 m, and an interior transect
+crossed zero ridge crests — flat plains between giant isolated hills.
+
+The new field is built the way water builds a landscape:
+
+1. **Drainage** — a gentle tilt from the interior down to the south shore.
+2. **Relief regions** — ~2.4 km patches of hill country and flat-pan
+   basins, so the world has open plains *and* busy ground.
+3. **Ridges** — contrast-stretched ridged noise lays crest *lines* (not
+   blobs), domain-warped so they meander: a scenic crest every ~500 m.
+4. **Erosion valleys** — a dendritic network of main valleys with
+   tributaries that only exist inside them, deepening downstream.
+5. **Benches** — short escarpment steps on the hill flanks: cliffs to
+   ride along, never vertical walls.
+6. **Road corridors** — every main route carries a shallow vale of its
+   own, so roads run *along* valley floors, and pass roads switchback up
+   the border massifs.
+
+Measured against the brief (audited over 64,521 samples on a 25 m grid):
+
+| target | before | after |
+| --- | --- | --- |
+| terrain in the 0-120 m band | 9.1% | **78.0%** (99.6% of non-massif land) |
+| mean elevation | 489 m | **186 m** |
+| scenic ridge spacing | no crests found | **680 m median** |
+| rolling-country slope | 9.5% over 37 deg | **p50 4.7, p95 19.2, 0.57% over 37 deg** |
+| steepest open-country ground | 89.6 deg | **55 deg** (an escarpment, not a wall) |
+
+The last 22% sits in the border ranges themselves — on an 8 x 5 km map a
+mountain ring around three edges is about a fifth of the area, which is
+why the second row matters: essentially *all* rideable land is now in the
+0-120 m band. Massif flanks and the Red Canyon walls stay steep on
+purpose; nothing in the open country does.
+
+Border mountains stay at the map edges (a confinement mask forbids inland
+massifs), the 14 named peaks and the 2,239 m Kanjiro summit remain, and
+all 26 roads still meet their grade limits (mains 9.2 deg, passes 8.6
+deg). Road beds are relaxed onto the ground under a fill cap instead of
+being propped on 500 m pedestals, and the Eagle Approach serpentine was
+re-laid onto the rebuilt flank with its summit pinned to the pass saddle,
+so the marquee climb is a genuine 1.5 km switchback ascent again.
 
 ## Tech
 

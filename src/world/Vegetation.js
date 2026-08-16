@@ -201,7 +201,12 @@ export class Vegetation {
       // No vegetation on the beach / under the sea; keep clear of
       // roads/trails, the groomed meadow core and the lake.
       const dMeadow = Math.hypot(x - 4000, z - 2500);
-      if (h >= 55 && info.trail <= 0.02 && dMeadow >= 240 && lf.roadDist(x, z) >= 11) {
+      // Chapter 6 elevation rebuild: the tree line, the conifer belt and
+      // the shoreline cut-off all move with the new terrain band. 47 m is
+      // just above the inland floor; the beach strip (z > 4420) stays
+      // bare sand.
+      const shore = z > 4420 && h < 66;
+      if (h >= 47 && !shore && info.trail <= 0.02 && dMeadow >= 240 && lf.roadDist(x, z) >= 11) {
         // Slope: no trees on cliffs.
         const e = 5;
         const sl = Math.hypot(f.height(x + e, z) - f.height(x - e, z),
@@ -211,11 +216,11 @@ export class Vegetation {
           const isTree = i < nTrees;
           let t = null, s = 1, ok = true;
           if (isTree) {
-            if (h > 1500) ok = false; // above the tree line
+            if (h > 1250) ok = false; // above the tree line
             else {
-              if (h > 320) {
-                // Foothill conifer belt.
-                t = h > 1100 && r < 0.3 ? 'dead' : r < 0.55 ? 'pine' : 'fir';
+              if (h > 150) {
+                // Foothill conifer belt (starts at the first rise now).
+                t = h > 620 && r < 0.3 ? 'dead' : r < 0.55 ? 'pine' : 'fir';
               } else {
                 // Lowland broadleaf.
                 t = r < 0.4 ? 'birch' : r < 0.7 ? 'oak' : rr < 0.5 ? 'pine' : 'bush';
@@ -223,7 +228,7 @@ export class Vegetation {
               if (info.moist < 0.25 && rr < 0.35) t = 'dead';
               s = 1.15 + rng() * 0.75;
             }
-          } else if (h > 1300 || sl > 0.4) {
+          } else if (h > 900 || sl > 0.4) {
             ok = false;
           } else {
             // Ground cover: grass/flowers in the open, ferns/shrubs in woods.

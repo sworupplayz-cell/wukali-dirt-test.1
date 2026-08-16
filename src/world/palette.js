@@ -31,7 +31,7 @@ export function colorFor(info, out, x = 0, z = 0) {
   //   beach sand near/below sea level along the south coast
   //   red sandstone strata in the Red Canyon (far west)
   //   dark basalt on the Volcanic Highlands (far east)
-  const beach = z > 4300 ? sstep(90, 55, h) : 0;
+  const beach = z > 4300 ? sstep(72, 44, h) : 0;
   const canyon = x < 1300 && z > 1400 && z < 3800 ? sstep(1150, 700, x) : 0;
   const basalt = x > 6900 && z > 1700 && z < 4100 ? sstep(7100, 7500, x) : 0;
 
@@ -45,12 +45,18 @@ export function colorFor(info, out, x = 0, z = 0) {
   let g = 0.60 - 0.10 * m + gv * 0.4;
   let b = 0.29 - 0.06 * m - gv * 0.3;
 
-  // Dry scrub on the lowest valley floors.
-  const dry = sstep(160, 110, h);
-  r += (0.58 - r) * dry * 0.5; g += (0.55 - g) * dry * 0.5; b += (0.36 - b) * dry * 0.5;
+  // Chapter 6 — the bands follow the rebuilt elevation range (the whole
+  // rolling country now lives between ~45 m and ~130 m, so the old
+  // 110-1650 m bands would have painted the entire world as scrub).
+  // Damp, lush ground in the valley bottoms where water collects...
+  const lush = sstep(88, 52, h);
+  r += (0.34 - r) * lush * 0.45; g += (0.52 - g) * lush * 0.45; b += (0.22 - b) * lush * 0.45;
+  // ...sun-bleached grass along the ridge crests above them.
+  const dry = sstep(96, 145, h);
+  r += (0.60 - r) * dry * 0.55; g += (0.56 - g) * dry * 0.55; b += (0.34 - b) * dry * 0.55;
 
   // Alpine rock band with strata variation.
-  const rock = sstep(420, 1050, h);
+  const rock = sstep(260, 720, h);
   if (rock > 0) {
     const strata = (vnoise(x * 0.006 + h * 0.004, z * 0.006, 917) - 0.5) * 0.09;
     r += (0.46 + 0.05 * m + strata - r) * rock;
@@ -59,7 +65,7 @@ export function colorFor(info, out, x = 0, z = 0) {
   }
 
   // Snow cap.
-  const snow = sstep(1650, 2050, h);
+  const snow = sstep(950, 1400, h);
   r += (0.93 - r) * snow; g += (0.95 - g) * snow; b += (0.98 - b) * snow;
 
   // Dirt road/trail tint with a noise-broken soft edge, worn tire paths,
@@ -133,7 +139,7 @@ export function colorFor(info, out, x = 0, z = 0) {
     g += (0.23 - g) * basalt * 0.75;
     b += (0.22 - b) * basalt * 0.75;
     // ember glints high on the volcano
-    const glow = sstep(900, 1300, h) * basalt;
+    const glow = sstep(620, 950, h) * basalt;
     if (glow > 0) {
       const gl = vnoise(x * 0.05, z * 0.05, 941);
       if (gl > 0.82) { r += glow * 0.5; g += glow * 0.12; }

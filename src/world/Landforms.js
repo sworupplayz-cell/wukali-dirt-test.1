@@ -37,7 +37,7 @@ import { vnoise, sstep } from './noise.js';
 
 export const WORLD_W = 8000;
 export const WORLD_H = 5000; // Chapter 4: 40 km^2
-export const MEADOW = { x: 4000, z: 2500, r: 600, e: 165 }; // world center
+export const MEADOW = { x: 4000, z: 2500, r: 600, e: 66 }; // world center
 export const LAKE = { x: 4230, z: 2710, r: 90, depth: 6 };
 export const LAKES = [
   LAKE,
@@ -63,47 +63,59 @@ const RANGES = [
   {
     id: 'N', name: 'Glacier Wall',
     nodes: [
-      [900, 700, 1450, 740, 'Vetra Peak'],
-      [2100, 660, 1700, 850, 'Mistral Horn'],
-      [3300, 690, 1550, 780, 'Sorren Dome'],
-      [4400, 740, 1800, 880, 'Thornspire'],
-      [5300, 700, 1500, 760, 'Weisshorn'],
+      [900, 210, 1020, 576, 'Vetra Peak'],
+      [2100, 380, 1150, 980, 'Mistral Horn'],
+      [3300, 760, 1240, 900, 'Sorren Dome'],
+      [4400, 200, 1060, 450, 'Thornspire'],
+      [5300, 180, 820, 378, 'Weisshorn'],
     ],
     dips: [0.56, 0.42, 0.46, 0.42],
   },
   {
     id: 'K', name: 'Kanjiro Massif',
     nodes: [
-      [6200, 920, 1700, 800, 'Vel Morra'],
-      [7050, 1060, 1890, 1000, 'Kanjiro Peak'],
-      [7720, 1450, 1500, 680, 'Eastwatch'],
+      [6300, 330, 1020, 414, 'Vel Morra'],
+      [7250, 480, 2080, 576, 'Kanjiro Peak'],
+      [7820, 1100, 900, 378, 'Eastwatch'],
     ],
     dips: [0.28, 0.30],
   },
   {
     id: 'V', name: 'Volcanic Highlands',
     nodes: [
-      [7780, 2100, 1250, 620, 'Cinder Ridge'],
-      [7860, 2850, 1500, 700, 'Mount Ember'],
-      [7780, 3600, 1200, 600, 'Ash Spire'],
+      [7930, 2100, 820, 360, 'Cinder Ridge'],
+      [7960, 2850, 1120, 414, 'Mount Ember'],
+      [7930, 3600, 800, 342, 'Ash Spire'],
     ],
     dips: [0.33, 0.33],
   },
   {
     id: 'R', name: 'Redwall',
     nodes: [
-      [320, 1700, 900, 520, 'Redwall North'],
-      [270, 2500, 1100, 600, 'Redwall Point'],
-      [320, 3300, 950, 540, 'Redwall South'],
+      [180, 1700, 700, 315, 'Redwall North'],
+      [140, 2500, 900, 360, 'Redwall Point'],
+      [180, 3300, 740, 324, 'Redwall South'],
     ],
     dips: [0.33, 0.33],
   },
 ];
 
-// New profile: cos^2 crest (45% of height, width W) on a wide quartic
-// skirt (55%, width 2.6 W). Crest flank tops out ~54 deg on the largest
-// peak (scenery); skirts stay ~33 deg. No walls, no spikes.
-const CREST_F = 0.45, SKIRT_F = 0.55, SKIRT_W = 2.6;
+// Profile: cos^2 crest (45% of height, width W) on a quartic skirt
+// (55%). Chapter 6: the skirt width drops from 2.6 W to 1.55 W. The old
+// wide skirt is what pushed the WHOLE interior up to 150-350 m — a
+// 1,890 m peak still added ~750 m of ground a kilometre away. Peak
+// heights and near-crest slopes are unchanged (the two terms still sum
+// to H at the summit); only the far tail is cut, so the ranges read as
+// mountains standing at the border instead of a continent-wide dome.
+const CREST_F = 0.45, SKIRT_F = 0.55, SKIRT_W = 1.25;
+// Border confinement: massifs are full strength within MTN_EDGE0 of a
+// map edge and gone by MTN_EDGE1. Every authored spine sits inside
+// MTN_EDGE0, so no peak loses height — this only forbids inland tails.
+const MTN_EDGE0 = 620, MTN_EDGE1 = 1120;
+// Red Canyon (west): axis, floor and the width over which the trench
+// blends back into the natural ground.
+const CANYON_X = 690, CANYON_FLOOR = 56;
+const CANYON_HALF = 210, CANYON_FADE = 470;
 
 // ---- 1. Main roads (authored FIRST — gameplay skeleton) --------------------
 // Chapter 3A: every road is a named, handcrafted spline. The Meadow Loop
@@ -134,9 +146,13 @@ const MAIN_ROUTES = [
   // Chapter 4: the marquee climb — a handcrafted serpentine from the
   // Glacier Route bench (232 m) up the Vetra/Mistral notch to the Eagle
   // Pass saddle (~1150 m): 8 authored switchback legs, grade-clamped.
-  { name: 'Eagle Approach', w: 2.5, grade: 0.145, wander: 0.25, corrStr: 0.82, corrW: 320, pts: [
-    [2500, 1395], [2260, 1300], [2560, 1215], [2280, 1130], [2600, 1050],
-    [2340, 975], [2640, 905], [2440, 830], [2700, 760], [2700, 675]] },
+  // Chapter 6: the serpentine was re-laid ONTO the rebuilt flank. It
+  // traverses the foot at valley level, then switchbacks inside the
+  // 560-1000 m band where the ground actually climbs, so the bed is a
+  // cutting in the hillside instead of a viaduct over the meadow.
+  { name: 'Eagle Approach', w: 3.4, grade: 0.16, wander: 0.2, corrStr: 0.88, corrW: 700, endSaddle: [0, 1], pts: [
+    [2500, 1395], [2620, 1180], [2500, 1010], [2830, 950], [2500, 890],
+    [2810, 830], [2520, 770], [2760, 710], [2600, 650], [2700, 570]] },
 ];
 
 // Named singletrack routes laid AFTER the passes (they pin to them).
@@ -172,8 +188,8 @@ const NAMED_TRAILS = [
     [7330, 2210], [7480, 2060], [7590, 1920]] },
   { name: 'Rim Vista Trail', w: 1.25, grade: 0.13, type: 4, wander: 0.6, pts: [
     [850, 2470], [950, 2280], [1030, 2120]] },
-  { name: "Miner's Path", w: 1.25, grade: 0.14, type: 4, wander: 0.5, pts: [
-    [600, 2830], [620, 2500], [660, 2230]] },
+  { name: "Miner's Path", w: 1.25, grade: 0.115, type: 4, wander: 0.35, pts: [
+    [700, 2830], [720, 2500], [700, 2230]] },
   { name: 'Coast Caves Trail', w: 1.25, grade: 0.16, type: 4, wander: 0.4, pts: [
     [5700, 4310], [5920, 4400], [5980, 4520], [6180, 4620]] },
 ];
@@ -191,7 +207,9 @@ const W_MAIN = 3.5;
 const W_PASS = 2.5;
 const MAIN_GRADE = 0.11;   // 6.3 deg — well under the 10 deg road cap
 const PASS_GRADE = 0.138;  // 7.9 deg construction => surface stays <= 10 deg
-const ROAD_FADE_MAX = 185; // deep Chapter 4 bench cuts stay <= 18 deg aprons
+const ROAD_FADE_MAX = 190; // apron reach cap (Chapter 6: bounded)
+const FILL_MAX = 40;       // deepest embankment a laid bed may stand on
+const CUT_MAX = 30;        // deepest cutting before the bed is relaxed up
 const PASS_WAVE = 560; // longer traverses on the wide Chapter 4 pedestals
 const RD_STEP = 16;
 const RD_CELL = 128;
@@ -314,7 +332,7 @@ export class Landforms {
     this._corrHash = new Map();
     for (const route of MAIN_ROUTES) {
       const str = route.corrStr ?? 1;
-      const cw = route.corrW ?? 450;
+      const cw = route.corrW ?? 340;
       const pts = route.pts;
       for (let i = 0; i < pts.length - 1; i++) {
         const ax = pts[i][0], az = pts[i][1];
@@ -393,7 +411,11 @@ export class Landforms {
     // contribution within 1 km of Rider's Meadow, full height only
     // beyond ~1.8 km, so the spawn reads as an open valley with distant
     // mountains instead of a bowl.
+    // Border-only rule: fade the massif out as we move inland from the
+    // nearest map edge (Chapter 6).
+    const edge = Math.min(x, WORLD_W - x, z, WORLD_H - z);
     const sup = (1 - 0.94 * this.corridor(x, z)) *
+      (1 - sstep(MTN_EDGE0, MTN_EDGE1, edge)) *
       sstep(1000, 1800, Math.hypot(x - MEADOW.x, z - MEADOW.z));
     const out = best * sup;
     this._mmX = x; this._mmZ = z; this._mmV = out;
@@ -407,17 +429,21 @@ export class Landforms {
    * enter along the floor.
    */
   canyonCarve(x, z, h) {
-    if (x < 250 || x > 1150 || z < 1500 || z > 3700) return h;
-    const zm = sstep(1500, 1750, z) * sstep(3700, 3450, z);
+    if (x > 1500 || z < 1380 || z > 3820) return h;
+    const zm = sstep(1400, 1760, z) * sstep(3800, 3440, z);
     if (zm <= 0) return h;
-    const d = Math.abs(x - 620);
-    const prof = 95 + 0.5 * Math.max(0, d - 170) + (1 - zm) * 500;
-    if (prof < h + 16) {
-      const k = 16;
-      const hh = Math.max(0, k - Math.abs(h - prof));
-      h = Math.min(h, prof) - (hh * hh) / (4 * k);
-    }
-    return h;
+    // Chapter 6: the trench is blended in with a WIDTH MASK instead of a
+    // hard min() inside a rectangular region. The old version clipped at
+    // x = 250 and dropped ~900 m in one step — the single worst wall in
+    // the world. Now the carve fades out before it reaches the Redwall
+    // crest, so the rim is the mountain's own flank.
+    const d = x - CANYON_X;
+    const w = 1 - sstep(CANYON_HALF, CANYON_FADE, Math.abs(d));
+    if (w <= 0) return h;
+    const prof = CANYON_FLOOR +
+      (d < 0 ? 1.05 * Math.max(0, -d - 70) : 0.7 * Math.max(0, d - 120));
+    if (prof >= h) return h;
+    return h + (prof - h) * w * zm;
   }
 
   /** Practice jump kicker on the South Arm (applied AFTER road blending). */
@@ -458,9 +484,20 @@ export class Landforms {
     for (const route of MAIN_ROUTES) {
       const id = roadId++;
       const i0 = this._rx.length;
+      // Chapter 6: a route may be declared a CLIMB to a named saddle.
+      // Its last vertex is then pinned to the saddle elevation, so the
+      // grade clamp turns the authored serpentine into a real ramp
+      // instead of letting it wander back down every dip in the flank
+      // (which left the marquee climb 200 m below its own pass road).
+      let endE = null;
+      if (route.endSaddle) {
+        const r = RANGES[route.endSaddle[0]];
+        const a = r.nodes[route.endSaddle[1]], b = r.nodes[route.endSaddle[1] + 1];
+        endE = raw((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
+      }
       const lenM = this._laySpline(raw, route.pts, id, {
         w: route.w ?? W_MAIN, grade: route.grade ?? MAIN_GRADE, type: 1,
-        calm: route.calm, wander: route.wander ?? 1,
+        calm: route.calm, wander: route.wander ?? 1, endE,
       });
       this.roadMeta.set(id, { name: route.name, i0, n: this._rx.length - i0, type: 1 });
       this.mainRoads.push({ name: route.name, roadId: id, lengthM: lenM });
@@ -631,15 +668,44 @@ export class Landforms {
     for (let i = 0; i < X.length; i++) E[i] = raw(X[i], Z[i]);
     const eStart = this._roadElevNear(X[0], Z[0]);
     if (eStart !== null) E[0] = eStart;
-    const eEnd = this._roadElevNear(X[X.length - 1], Z[X.length - 1]);
+    const eEnd = opts.endE != null ? opts.endE
+      : this._roadElevNear(X[X.length - 1], Z[X.length - 1]);
     if (eEnd !== null) E[E.length - 1] = eEnd;
-    for (let i = 1; i < E.length; i++) {
-      const ds = Math.hypot(X[i] - X[i - 1], Z[i] - Z[i - 1]);
-      E[i] = Math.max(E[i - 1] - grade * ds, Math.min(E[i - 1] + grade * ds, E[i]));
-    }
-    for (let i = E.length - 2; i >= 0; i--) {
-      const ds = Math.hypot(X[i + 1] - X[i], Z[i + 1] - Z[i]);
-      E[i] = Math.max(E[i + 1] - grade * ds, Math.min(E[i + 1] + grade * ds, E[i]));
+    const pinnedEnd = eEnd !== null;
+    const clampGrade = () => {
+      const last = E.length - (pinnedEnd ? 2 : 1);
+      for (let i = 1; i <= last; i++) {
+        const ds = Math.hypot(X[i] - X[i - 1], Z[i] - Z[i - 1]);
+        E[i] = Math.max(E[i - 1] - grade * ds, Math.min(E[i - 1] + grade * ds, E[i]));
+      }
+      for (let i = E.length - 2; i >= 1; i--) {
+        const ds = Math.hypot(X[i + 1] - X[i], Z[i + 1] - Z[i]);
+        E[i] = Math.max(E[i + 1] - grade * ds, Math.min(E[i + 1] + grade * ds, E[i]));
+      }
+    };
+    clampGrade();
+    // Chapter 6 — ROADS FOLLOW THE VALLEYS. A single grade clamp pass can
+    // leave a bed hundreds of metres off the ground on steep flanks (the
+    // clamp propagates one endpoint's elevation across the whole road),
+    // which is what built the old fill pedestals and their wall-like
+    // aprons. Alternating "pull back down to the ground" with "re-clamp
+    // the grade" converges on the closest alignment the grade limit
+    // allows — exactly how a real alignment is fitted to a valley.
+    // The correction is a FILL CAP, not a general pull: a bed may cut
+    // into a hillside as deep as the alignment needs (that is how a road
+    // climbs a flank), but it may not stand on more than FILL_MAX of
+    // embankment. Alternating the cap with a grade re-clamp converges on
+    // an alignment that lies on the ground wherever it can — no more
+    // 500 m fill pedestals, and their wall-like aprons go with them.
+    if (opts.endE == null) {
+      for (let it = 0; it < 6; it++) {
+        for (let i = 1; i < E.length - 1; i++) {
+          const g = raw(X[i], Z[i]);
+          if (E[i] > g + FILL_MAX) E[i] += (g + FILL_MAX - E[i]) * 0.5;
+          else if (E[i] < g - CUT_MAX) E[i] += (g - CUT_MAX - E[i]) * 0.5;
+        }
+        clampGrade();
+      }
     }
     for (let p = 0; p < 2; p++) {
       for (let i = 1; i < E.length - 1; i++) E[i] = (E[i - 1] + 2 * E[i] + E[i + 1]) / 4;
@@ -733,7 +799,7 @@ export class Landforms {
       // Embankment with hysteresis: brief gully crossings bench over
       // (the blend widens automatically); only a SUSTAINED drop-away
       // (6 consecutive steps > 34 m) ends the flank.
-      if (e - eT > 50) { if (++embank >= 8) break; }
+      if (e - eT > 30) { if (++embank >= 5) break; }
       else embank = 0;
       if (x < 60 || x > WORLD_W - 60 || z < 60 || z > WORLD_H - 60) break;
     }
@@ -863,7 +929,7 @@ export class Landforms {
    */
   roads(x, z, h, L) {
     const cx = Math.floor(x / RD_CELL), cz = Math.floor(z / RD_CELL);
-    let wSum = 0, weSum = 0, dMin2 = Infinity, nearW = W_PASS, nearT = 0;
+    let wSum = 0, weSum = 0, wMax = 0, dMin2 = Infinity, nearW = W_PASS, nearT = 0;
     for (let dz = -1; dz <= 1; dz++) {
       for (let dx = -1; dx <= 1; dx++) {
         const arr = this._hash.get((cx + dx) * RD_KEY + (cz + dz));
@@ -884,25 +950,30 @@ export class Landforms {
           const d = Math.sqrt(d2);
           // Per-segment weight: continuous, 0 at its own fade edge; the
           // apron widens 3.2x cut/fill depth (shoulders <= ~17 deg).
-          const fade = Math.min(ROAD_FADE_MAX, hw * 2.3 + Math.abs(E - h) * 3.2);
+          const fade = Math.min(ROAD_FADE_MAX, hw * 2.3 + Math.abs(E - h) * 3.4);
           if (d >= fade) continue;
           let w = 1 - sstep(0, fade, d);
           w *= w;
           const bd = 1 - sstep(0, hw * 1.6, d);
           w *= 1 + 220 * bd * bd; // bed dominance: on-bed snaps to its road
           wSum += w; weSum += w * E;
+          if (w > wMax) wMax = w;
           if (d2 < dMin2) { dMin2 = d2; nearW = hw; nearT = this._rt[i]; }
         }
       }
     }
     if (wSum <= 0) return h;
     const roadE = weSum / wSum;
-    // SATURATING blend — continuous EVERYWHERE by construction (each
-    // weight is continuous, so their sum is too). On a bed wSum >~ 220
-    // => blend ~ 0.9995; at any fade edge wSum -> 0 => blend -> 0.
-    // (A nearest-eligible-segment pick here is NOT continuous: a wall
-    // forms exactly where the nearest segment crosses its own
-    // depth-dependent eligibility edge.)
+    // SATURATING blend — continuous EVERYWHERE by construction (every
+    // weight is a continuous function of position). On a bed the weight
+    // is >~ 220 => blend ~ 0.9995; at any fade edge it goes to 0.
+    //
+    // Chapter 6: the apron reach is bounded (see ROAD_FADE_MAX) so a bed
+    // perched on a ridge can no longer drag the valley floor 200 m away
+    // up with it — those fill pedestals, not the terrain itself, built
+    // the last near-vertical walls in the playable world. Their real fix
+    // is upstream: spline beds are relaxed onto the ground and the pass
+    // walker stops as soon as it starts flying (see _walkSwitchbacks).
     const blend = wSum / (wSum + 0.12);
     h += (roadE - h) * blend;
     const dMin = Math.sqrt(dMin2);
@@ -948,12 +1019,33 @@ export class Landforms {
   }
 
   /** Nth vertex of a pass road's first flank (tests/debug). */
+  /**
+   * Nth vertex of a pass road, from the saddle down its MAIN flank.
+   * (Chapter 6: it used to always read the first flank's road id, so a
+   * pass whose first flank is short — the Eagle Pass, hemmed in by its
+   * own approach road — looked like a two-point stub to anything reading
+   * the pass geometry, including the CI pass-climb ride.)
+   */
   passPoint(pi, n) {
     const p = this.passes[pi];
-    const i0 = this._rid.indexOf(p.roadId);
-    const i = Math.min(this._rx.length - 1, i0 + n);
-    if (this._rid[i] !== p.roadId) return null;
-    return { x: this._rx[i], z: this._rz[i], e: this._re[i] };
+    let pts = p._pts;
+    if (!pts) {
+      const collect = (rid) => {
+        const out = [];
+        for (let i = 0; i < this._rx.length; i++) {
+          if (this._rid[i] !== rid) continue;
+          out.push({ x: this._rx[i], z: this._rz[i], e: this._re[i] });
+        }
+        return out;
+      };
+      const ids = p.flankIds || [p.roadId];
+      const a = collect(ids[0]);
+      const b = ids[1] ? collect(ids[1]) : [];
+      // The pass IS its main flank: saddle -> foot down the longer side.
+      pts = b.length > a.length ? b : a;
+      p._pts = pts;
+    }
+    return n < pts.length ? pts[n] : null;
   }
 
   /** Nearest peak whose massif contains (x,z), or null (F3 overlay). */

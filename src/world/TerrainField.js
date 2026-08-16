@@ -21,6 +21,43 @@ import { Landforms, MEADOW, LAKE, LAKES, SEA_LEVEL, WORLD_W, WORLD_H } from './L
 
 const SEED = 733;
 
+// ---- Chapter 6 lowland shaping ---------------------------------------------
+// 80% of the map has to live in the 0-120 m band, so the lowland is built
+// around a mean of ~86 m with +-35 m of relief on top of it.
+const LOW_BASE = 67;      // mean lowland elevation (m)
+const DRAIN = 18;         // drop from the interior to the southern shore
+const WEST_RISE = 12;     // west canyon plateau lift
+const EAST_RISE = 14;     // east rise toward the volcanic passes
+const LOW_FLOOR = 44;     // soft inland floor (above SEA_LEVEL 42)
+// Ridge system. Value noise has one period per 1/F metres and the folded
+// ridge transform puts a crest line at every half period, so F = 0.00095
+// lays a scenic crest every ~530 m — inside the 500-800 m target.
+const RIDGE_F = 0.0026;
+const RIDGE_H = 38;       // crest height above the trough line
+const FINE_F = 0.0062;    // fine crests (~190 m) for surface interest
+const FINE_H = 6;
+// Drainage: main valleys every ~900 m with tributaries inside them.
+const VALLEY_F = 0.00055;
+const VALLEY_H = 29;
+const TRIB_F = 0.0016;
+const TRIB_H = 11;
+const CORR_VALE = 9;      // vale carved along every main road corridor
+
+/**
+ * Ridged noise: 1 along a crest LINE, 0 in the flats between. Value
+ * noise gives blobs; the folded absolute value gives connected lines,
+ * which is what makes ridges and drainage networks read as continuous.
+ */
+function ridgeLine(x, z, s) {
+  return 1 - Math.abs(2 * vnoise(x, z, s) - 1);
+}
+
+/** Smooth maximum (quadratic blend) — a floor with no crease. */
+function smax(a, b, k) {
+  const d = Math.max(0, k - Math.abs(a - b));
+  return Math.max(a, b) + (d * d) / (4 * k);
+}
+
 // Lowland trail grid (2.5 m hidden shortcuts).
 const NS_SPACING = 800, NS_BASE = 400, NS_COUNT = 9;  // x = 400..6800
 const EW_SPACING = 700, EW_BASE = 350, EW_COUNT = 6;  // z = 350..3850
@@ -48,51 +85,108 @@ export class TerrainField {
     return this.sample(x, z, this._info).h;
   }
 
-  /** Base landmass WITHOUT roads/jump: plain + hills + ranges + meadow. */
+  /**
+   * Base landmass WITHOUT roads/jump — Chapter 6 terrain rebuild.
+   *
+   * The old field was a wide fBM "plain band" (115-325 m) with the
+   * mountain skirts spilling far inland: 9% of the map sat in the 0-120 m
+   * band, the mean elevation was 489 m and an interior transect crossed
+   * ZERO ridge crests — flat plains punctuated by giant isolated hills.
+   *
+   * The rebuild is an erosion-shaped landscape instead of a noise field:
+   *
+   *   1. DRAINAGE     a gentle continental tilt from the northern
+   *                   foothills down to the southern ocean; everything
+   *                   the water does follows this slope.
+   *   2. RELIEF MASK  broad regions (~2.4 km) of hill country and
+   *                   flat-pan BASINS, so the world has open plains AND
+   *                   busy ground instead of one uniform texture.
+   *   3. RIDGES       ridged noise (crest LINES, not blobs) at ~620 m and
+   *                   ~290 m wavelengths, domain-warped so the crests
+   *                   meander: a scenic ridge every 500-800 m.
+   *   4. VALLEYS      a dendritic drainage network carved into that
+   *                   surface — main valleys (~900 m spacing) with
+   *                   tributaries that only exist inside them, deepening
+   *                   downstream toward the coast.
+   *   5. BENCHES      short escarpment steps on hill flanks (~30 deg) —
+   *                   cliffs to ride along, never vertical walls.
+   *   6. CORRIDORS    main roads sit in the valley floor: relief is
+   *                   suppressed and a shallow vale is carved along every
+   *                   main route, so roads FOLLOW valleys.
+   *
+   * Mountains stay border-only (Landforms confines and narrows them).
+   */
   _base(x, z) {
     const lf = this.landforms;
     const corr = lf.corridor(x, z);
-    // Chapter 4 regional shaping (8000 x 5000, center 4000,2500):
-    //   N = Glacier Wall rise, NE = Kanjiro, E = Volcanic Highlands,
-    //   W = Red Canyon plateau, S = coastal shelf down to the ocean.
     const nz = (z - 2500) / 2500;  // -1 north edge .. +1 south edge
     const nx = (x - 4000) / 4000;  // -1 west edge .. +1 east edge
-    const regional =
-      -26 * Math.max(0, nz) +               // south: shelf eases seaward
-      14 * Math.max(0, -nx) +               // west: high canyon plateau
-      26 * Math.max(0, -nz) +               // north: rise to the wall
-      18 * Math.max(0, nx);                 // east: rise toward the passes
-    // Valley/plain band: 100-300 m, long wavelength, halved amplitude in
-    // the southern grasslands (rolling, never hilly). Inside a road
-    // corridor the band relaxes toward its midpoint — the corridor IS
-    // the valley (roads first), so roads never face deep cut benches.
-    const south = sstep(0.1, 0.7, nz);
-    const band = fbm2(x * 0.00055, z * 0.00055, SEED);
-    const plain = 115 + band * 210 * (1 - 0.55 * south);
-    let h = regional + 175 + (plain - 190) * (1 - 0.6 * corr);
+
+    // ---- 1. Drainage tilt: northern foothills -> southern shore -------
+    let h = LOW_BASE - DRAIN * Math.max(0, nz) * Math.max(0, nz) +
+      10 * Math.max(0, -nz) +
+      WEST_RISE * Math.max(0, -nx) + EAST_RISE * Math.max(0, nx);
+
+    // ---- 2. Relief regions: hill country vs flat-pan basins -----------
+    // (0.35 = pan-flat basin floor, 1.4 = busiest hill country)
+    const relief = 0.55 + 0.85 * vnoise(x * 0.00042 + 11.3, z * 0.00042 - 5.9, SEED + 9);
+    // Domain warp so crest lines meander instead of running dead straight.
+    const wx = x + 140 * (vnoise(x * 0.00055 + 4.2, z * 0.00055 - 1.7, SEED + 3) - 0.5);
+    const wz = z + 140 * (vnoise(x * 0.00055 - 6.1, z * 0.00055 + 8.3, SEED + 4) - 0.5);
+
+    // Open country factor: corridors and the meadow keep their floor.
+    const mm = lf.meadowMask(x, z);
+    const open = (1 - 0.7 * corr) * (1 - mm);
+
+    // ---- 3. Ridges (crest lines every ~530 m + fine surface relief) ---
+    // Contrast stretch: interpolated value noise only swings about a
+    // third of its nominal range, so the raw ridge field reads as a
+    // gentle swell. Stretching it turns the crest lines into actual
+    // ridges with defined troughs between them.
+    const r1 = sstep(0.36, 0.99, ridgeLine(wx * RIDGE_F, wz * RIDGE_F, SEED + 13));
+    const r2 = sstep(0.45, 0.95, ridgeLine(wx * FINE_F + 3.3, wz * FINE_F - 2.7, SEED + 17));
+    h += (RIDGE_H * r1 * relief + FINE_H * r2) * open;
+
+    // ---- 4. Erosion: dendritic valley network -------------------------
+    // Tributaries only exist where a main valley already runs, which is
+    // what makes the network read as water-carved rather than noisy.
+    const v1 = sstep(0.44, 0.98, ridgeLine(wx * VALLEY_F - 8.8, wz * VALLEY_F + 5.5, SEED + 23));
+    const v2 = sstep(0.5, 0.97, ridgeLine(wx * TRIB_F + 2.2, wz * TRIB_F - 9.4, SEED + 29));
+    const main = v1;
+    const flow = 0.55 + 0.45 * sstep(-1, 0.9, nz);   // deeper downstream
+    h -= (VALLEY_H * main + TRIB_H * v2 * v2 * sstep(0.35, 0.75, v1)) *
+      flow * (0.5 + 0.5 * relief) * open;
+
+    // ---- 5. Benches: short escarpments on the hill flanks -------------
+    h += 7 * sstep(0.44, 0.66, r1) * sstep(0.55, 0.85, relief) * open;
+
+    // ---- 6. Roads follow valleys --------------------------------------
+    // Every main corridor carries a shallow vale of its own, so a road
+    // laid down the corridor is a road running along a valley floor.
+    h -= CORR_VALE * corr * corr;
+
     // COASTAL CLIFFS + ocean: past z~4380 the shelf steps down an eased
     // cliff band onto a beach that slides under SEA_LEVEL (42). The
     // ocean IS the south border — water, not an invisible wall.
-    const coast = sstep(4380, 4700, z);
-    h += (26 - h) * coast * (1 - 0.55 * corr);
-    h -= sstep(4780, 5000, z) * 46;
+    const coast = sstep(4380, 4660, z);
+    h += (50 - h) * coast * (1 - 0.55 * corr);
+    // Shallow shelf rather than a trench: the sea floor slides just under
+    // the waterline (SEA_LEVEL 42) and stays there, which is both what a
+    // sand coast looks like and one less slab of terrain outside the
+    // 0-120 m band.
+    h -= sstep(4700, 5000, z) * 46;
 
-    // Rolling hills — suppressed in road corridors and the meadow;
-    // strongest in the SOUTH-WEST (the rolling-countryside region),
-    // softened in the southern grasslands.
-    const swBoost = 1 + 0.7 * sstep(0.15, 0.7, nz) * sstep(-0.15, -0.7, nx);
-    const open = (1 - 0.85 * corr) * (1 - lf.meadowMask(x, z));
-    h += (vnoise(x * 0.0028 + 13.7, z * 0.0028 - 7.1, SEED + 5) - 0.5) * 34 *
-      open * swBoost * (1 - 0.5 * south * (1 - 0.6 * swBoost));
-    h += (vnoise(x * 0.009 + 3.1, z * 0.009 + 9.4, SEED + 7) - 0.5) * 7 * open;
+    // Soft floor: inland ground never sinks to the waterline (landmarks,
+    // props and vegetation all live above it). Smooth, so it cannot
+    // create a crease where it engages.
+    if (z < 4300) h = smax(h, LOW_FLOOR, 14);
 
-    // Mountain ranges (scenery, corridor- and spawn-basin-suppressed).
+    // Mountain ranges (border-confined scenery).
     h += lf.mountains(x, z);
     // Red Canyon trench (west region).
     h = lf.canyonCarve(x, z, h);
 
     // Rider's Meadow: flatten to the meadow plane, tiny undulation kept.
-    const mm = lf.meadowMask(x, z);
     if (mm > 0) {
       const meadowH = MEADOW.e +
         (vnoise(x * 0.006 + 31.7, z * 0.006 - 12.9, SEED + 11) - 0.5) * 3.2;
