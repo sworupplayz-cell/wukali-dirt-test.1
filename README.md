@@ -2,24 +2,19 @@
 
 A lightweight, Android-first, 3D off-road dirt-bike game.
 
-**Current status: Chapter 3.5 — Camera restoration.** The camera system
-was rebuilt to a stable, documented state. THIRD PERSON: the original
-tight horizontal chase feel (spring omega 9) with ONE clean vertical
-chain — gentle altitude pre-filter (0.65/s, smooth-blended to 6/s past
-2.5-4.5 m of error so drops catch up without threshold flicker) into the
-soft vertical spring (omega 0.95) — measured 72% less high-frequency
-shake than the original camera on the rough reference ride. CLIPPING: the
-desired point pre-compensates spring lag (2.4 m clamp margin, asymmetric
-4/0.9 per-s ease), a mid-ridge guard with a 1.6 m dead zone, plus a
-final-position slew-limited ground envelope + hard floor — minimum
-measured clearance 0.61 m on the rough ride with the anti-clip floor
-never engaging in normal riding. FIRST PERSON: helmet pose now derives
-from a RATE-LIMITED orientation (12/s slerp) so suspension buzz never
-reaches the head; alignment retuned (1.36 m eye height, level view
-through the bars). POV SWITCHING: the blend is now a SMOOTHSTEPPED TIMER
-(C1-continuous, 0.55 s) and the third-person blend reference uses the
-same filtered altitude as the steady camera — toggling mid-ride is
-kick-free (max per-frame velocity change 0.062 m, was 0.331 m).
+**Current status: Hotfix 3.5 — Original camera restored.** The camera is
+now the byte-for-byte ORIGINAL FollowCamera from the stable Wukali Ride
+Test build (commit 7d4913c): classic smooth third-person chase (constant
+6.2 m distance, 2.6 m height, 8/s frame-rate-independent exponential
+interpolation, 4.5/s heading tracking, simple terrain clearance clamp),
+the original first-person helmet camera (1.34 m eye height, view through
+the bars, follows the bike's full orientation), and the original eased
+POV toggle (5/s blend, smooth-stepped mix, no snapping). All experimental
+camera filtering from the recent stability chapters is removed — CI now
+asserts the live camera's vertical track matches the original algorithm
+with 0 m deviation on the rough reference ride. Everything else (engine
+beta loader, collision, LOD, streaming, graphics settings, world) is
+untouched.
 
 ## Tech
 

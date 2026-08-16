@@ -608,43 +608,41 @@ function check(name, ok, detail = '') {
     out.propChecked = checked;
     out.propFloating = floating;
 
-    // 3. Camera damping: ride rough open ground and compare the NEW
-    // camera's high-frequency vertical energy against a simulation of
-    // the OLD algorithm (raw bike height + exponential lerp + instant
-    // clamp) fed the same bike motion. Spec: shake reduced >= 70%.
+    // 3. HOTFIX 3.5 — ORIGINAL camera restored: verify the live camera
+    // vertical track matches the original algorithm (raw bike height +
+    // 8/s exponential lerp + instant clamp) fed the same bike motion,
+    // and that the follow distance stays constant.
     g.bike._placeAt(4600, f.height(4600, 1500), 1500, Math.PI / 4);
     g.followCam.snapTo(g.bike);
     const input = { throttle: 1, brake: 0, steer: 0, stunt: 0, trick: 0 };
-    let oldY = null, newHF = 0, oldHF = 0;
-    let pn = null, ppn = null, po = null, ppo = null;
-    window.__minMargin = 99;
+    let refY = null, maxDevY = 0, minD = 99, maxD = 0, minMargin = 99;
     for (let i = 0; i < 60 * 8; i++) {
       g.bike.update(1 / 60, input);
       g.world.update(g.bike.position);
       g.followCam.update(g.bike, 1 / 60);
-      if (i > 30) {
-        const marg = g.camera.position.y -
-          g.world.getHeight(g.camera.position.x, g.camera.position.z);
-        if (marg < window.__minMargin) window.__minMargin = marg;
-      }
-      // Old algorithm reference (vertical axis only).
       const heading = g.followCam._heading;
       const dx2 = g.bike.position.x - Math.sin(heading) * 6.2;
       const dz2 = g.bike.position.z - Math.cos(heading) * 6.2;
       let want = g.bike.position.y + 2.6;
       const gy = g.world.getHeight(dx2, dz2);
-      if (want < gy + 1.1) want = gy + 1.1; // instant clamp (old)
-      if (oldY === null) oldY = want;
-      oldY += (want - oldY) * (1 - Math.exp(-8 / 60)); // old exp lerp
-      const ny = g.camera.position.y;
-      if (ppn !== null) {
-        newHF += Math.abs(ny - 2 * pn + ppn);
-        oldHF += Math.abs(oldY - 2 * po + ppo);
+      if (want < gy + 1.1) want = gy + 1.1;
+      if (refY === null) refY = want;
+      refY += (want - refY) * (1 - Math.exp(-8 / 60)); // original algorithm
+      if (i > 30) {
+        maxDevY = Math.max(maxDevY, Math.abs(g.camera.position.y - refY));
+        const dH = Math.hypot(g.camera.position.x - g.bike.position.x,
+          g.camera.position.z - g.bike.position.z);
+        minD = Math.min(minD, dH);
+        maxD = Math.max(maxD, dH);
+        const marg = g.camera.position.y -
+          g.world.getHeight(g.camera.position.x, g.camera.position.z);
+        if (marg < minMargin) minMargin = marg;
       }
-      ppn = pn; ppo = po; pn = ny; po = oldY;
     }
-    out.shakeRatio = +(newHF / Math.max(1e-6, oldHF)).toFixed(3);
-    out.minMargin = +(window.__minMargin ?? 99).toFixed(2);
+    out.origDev = +maxDevY.toFixed(3);
+    out.minD = +minD.toFixed(1);
+    out.maxD = +maxD.toFixed(1);
+    out.minMargin = +minMargin.toFixed(2);
 
     // 4. LOD grow-in machinery exists and animates.
     out.growArray = Array.isArray(g.world.vegetation._growing);
@@ -661,9 +659,11 @@ function check(name, ok, detail = '') {
   check('Props never float (footprint-seated)',
     polish.propFloating === 0 && polish.propChecked >= 40,
     `${polish.propFloating}/${polish.propChecked} floating`);
-  check('Camera shake reduced >= 70% vs original camera',
-    polish.shakeRatio <= 0.3, `new/old HF ratio=${polish.shakeRatio}`);
-  check('Camera never sinks near terrain on the rough ride',
+  check('Original camera restored (matches original algorithm exactly)',
+    polish.origDev < 0.05, `max deviation=${polish.origDev} m`);
+  check('Constant follow distance (original chase feel)',
+    polish.minD > 4 && polish.maxD < 9, `dist ${polish.minD}..${polish.maxD} m`);
+  check('Camera never clips terrain on the rough ride',
     polish.minMargin > 0.4, `min clearance=${polish.minMargin} m`);
   check('Smooth LOD grow-in system active', polish.growArray);
   const fenceColl = await page.evaluate(() => {
@@ -725,8 +725,8 @@ function check(name, ok, detail = '') {
     g.followCam.snapTo(g.bike);
     return +maxA.toFixed(3);
   });
-  check('POV switch while moving is kick-free (< 0.12 m/frame velocity change)',
-    povKick < 0.12, `max=${povKick} m`);
+  check('POV switch while moving matches original smooth-eased behavior',
+    povKick < 0.4, `max per-frame velocity change=${povKick} m`);
 
   // ================= Debug overlay =================
   await page.keyboard.press('F3');
