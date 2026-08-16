@@ -205,6 +205,20 @@
   </div>
 
   <!-- Pause -->
+  <!-- Loading screen (Chapter 3D Engine Beta) -->
+  <div id="loading-overlay" class="overlay hidden" style="background:#101b12; z-index: 25;">
+    <div class="panel" style="background:transparent;">
+      <div class="title">HORIZON RIDE</div>
+      <div class="subtitle" id="loading-tip">Preparing the world&hellip;</div>
+      <div style="width: clamp(220px, 55vmin, 380px); height: 10px; border-radius: 999px;
+                  background: rgba(255,255,255,0.14); overflow: hidden; margin-top: 10px;">
+        <div id="loading-bar" style="width:0%; height:100%; border-radius:999px;
+             background:#ff7a1a; transition: width 0.15s;"></div>
+      </div>
+      <div id="loading-pct" style="color:#cfd8dc; font-size:14px; margin-top:8px;">0%</div>
+    </div>
+  </div>
+
   <div id="pause-overlay" class="overlay hidden">
     <div class="panel">
       <div class="title" style="font-size:clamp(22px,5vmin,34px);">PAUSED</div>

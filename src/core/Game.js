@@ -101,8 +101,54 @@ export class Game {
     this.audio.resume();
     this.bike.fullReset();
     this.followCam.snapTo(this.bike);
-    this._startRun();
-    this._setState(State.PLAYING);
+    // Chapter 3D Engine Beta: LOADING SCREEN + full warm-up before the
+    // first playable frame. Terrain around the spawn (the whole 11x11
+    // tracked window incl. the hidden pre-build ring), the sector prop
+    // set, the vegetation window and one warm-up render (shader compile,
+    // buffer upload) all complete behind the loader — gameplay starts
+    // with zero pending work.
+    if (this.onLoadProgress) {
+      this._preload().then(() => {
+        this._startRun();
+        this._setState(State.PLAYING);
+      });
+    } else {
+      this._startRun();
+      this._setState(State.PLAYING);
+    }
+  }
+
+  /** Async warm-up with progress callbacks (loading screen). */
+  async _preload() {
+    const report = (f, label) => this.onLoadProgress &&
+      this.onLoadProgress(Math.min(1, f), label);
+    const frame = () => new Promise((r) => requestAnimationFrame(r));
+    const p = this.bike.position;
+    report(0.02, 'Laying out the valley\u2026');
+    // Seed the streaming windows at the spawn.
+    this.world.update(p);
+    await frame();
+    // Drain ALL queued tile builds (~8-14 ms per chunk of 6, spread over
+    // frames so the loader bar animates).
+    const total = Math.max(1, this.world.tiles.pending);
+    let left = total;
+    while (left > 0) {
+      left = this.world.tiles.drainSome(6, p.x, p.z);
+      report(0.05 + 0.7 * (1 - left / total), 'Building terrain\u2026');
+      await frame();
+    }
+    // Warm props + vegetation windows (matrix rewrites).
+    report(0.78, 'Placing landmarks\u2026');
+    this.world.update(p);
+    await frame();
+    // Warm-up renders: compile shaders (incl. shadow path) and upload
+    // every buffer while the loader still covers the screen.
+    report(0.88, 'Warming the renderer\u2026');
+    this.renderer.render(this.scene, this.camera);
+    await frame();
+    this.renderer.render(this.scene, this.camera);
+    report(1, 'Ready');
+    await frame();
   }
 
   togglePause() {

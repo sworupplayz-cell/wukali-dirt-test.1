@@ -111,6 +111,28 @@ export class TerrainTiles {
     }
   }
 
+  /** Remaining unbuilt tiles (loading-screen progress). */
+  get pending() {
+    return this._queue.length;
+  }
+
+  /** Build up to n queued tiles immediately (loading-screen warm-up). */
+  drainSome(n, px, pz) {
+    for (let k = 0; k < n && this._queue.length > 0; k++) {
+      let best = 0, bestD = Infinity;
+      for (let i = 0; i < this._queue.length; i++) {
+        const r = this._queue[i];
+        if (r.released) { this._queue.splice(i, 1); i--; continue; }
+        const d = Math.max(Math.abs((r.cx + 0.5) * TILE - px), Math.abs((r.cz + 0.5) * TILE - pz));
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      if (this._queue.length === 0) break;
+      const rec = this._queue.splice(best, 1)[0];
+      if (!rec.built && !rec.released) this._build(rec);
+    }
+    return this._queue.length;
+  }
+
   _enter(cx, cz) {
     // Never generate outside the permanent world rectangle.
     if (cx < 0 || cx * TILE >= WORLD_W || cz < 0 || cz * TILE >= WORLD_H) return null;

@@ -56,7 +56,7 @@ export class FollowCamera {
     if (this._smoothY === undefined) this._smoothY = bike.position.y;
     const dy = bike.position.y - this._smoothY;
     // Faster catch-up on big drops/climbs, gentle on small vibration.
-    const k = Math.min(1, (Math.abs(dy) > 2.0 ? 6 : 0.9) * this._dt);
+    const k = Math.min(1, (Math.abs(dy) > 3.5 ? 6 : 0.65) * this._dt);
     this._smoothY += dy * k;
     this._desired.set(
       bike.position.x - sx * dist,
@@ -70,7 +70,7 @@ export class FollowCamera {
     const wantMin = groundY + 1.1;
     if (this._clampY === undefined) this._clampY = 0;
     const deficit = Math.max(0, wantMin - this._desired.y);
-    this._clampY += (deficit - this._clampY) * Math.min(1, 4 * this._dt);
+    this._clampY += (deficit - this._clampY) * Math.min(1, 2.5 * this._dt);
     this._desired.y += Math.max(this._clampY, 0);
     if (this._desired.y < groundY + 0.55) this._desired.y = groundY + 0.55;
   }
@@ -93,7 +93,7 @@ export class FollowCamera {
     // Split stiffness: horizontal chase stays TIGHT (om 9 — the follow
     // distance never balloons under acceleration), vertical is SOFT
     // (om 4 — bump energy is where the shake lives).
-    const omH = 9, omV = 2.0;
+    const omH = 9, omV = 0.95;
     const st = Math.min(dt, 1 / 30); // stable integration on slow frames
     this._vel.x += (omH * omH * (this._desired.x - this._pos.x) - 2 * omH * this._vel.x) * st;
     this._vel.y += (omV * omV * (this._desired.y - this._pos.y) - 2 * omV * this._vel.y) * st;
@@ -139,7 +139,7 @@ export class FollowCamera {
     // Look-at height uses the same smoothed altitude: the view no longer
     // nods with every suspension compression.
     const ty = (this._smoothY !== undefined ? this._smoothY : bike.position.y) +
-      (bike.position.y - (this._smoothY ?? bike.position.y)) * 0.15;
+      (bike.position.y - (this._smoothY ?? bike.position.y)) * 0.05;
     this._target.set(
       bike.position.x + Math.sin(this._heading) * 2.0,
       ty + 1.0,

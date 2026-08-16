@@ -42,22 +42,34 @@ export class Props {
     const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
     const matD = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
     this.types = {
-      flags: { geo: buildFlags(), max: CAP.flags, mat: matD, coll: 0 },
-      sign: { geo: buildSignpost(), max: CAP.sign, mat, coll: 0 },
+      // coll: single-circle radius (legacy). shape: list of LOCAL
+      // [x, z, r] circles rotated by yaw & scaled by s — Chapter 3D
+      // Engine Beta gives EVERY prop proper collision while keeping
+      // rideable openings (arch gate, bridge deck) open.
+      flags: { geo: buildFlags(), max: CAP.flags, mat: matD,
+        shape: [[-2.2, 0, 0.3], [2.2, 0, 0.3]] },            // the two poles
+      sign: { geo: buildSignpost(), max: CAP.sign, mat, shape: [[0, 0, 0.32]] },
       rocks: { geo: buildRocks(), max: CAP.rocks, mat, coll: 2.6 },
       boulder: { geo: buildBoulder(), max: CAP.boulder, mat, coll: 2.2 },
       slab: { geo: buildSlab(), max: CAP.slab, mat, coll: 2.4 },
       spire: { geo: buildSpire(), max: CAP.spire, mat, coll: 1.4 },
-      scree: { geo: buildScree(), max: CAP.scree, mat, coll: 0 },
-      lookout: { geo: buildLookout(), max: CAP.lookout, mat, coll: 0 },
+      scree: { geo: buildScree(), max: CAP.scree, mat, coll: 0 }, // ride-over gravel
+      lookout: { geo: buildLookout(), max: CAP.lookout, mat,
+        shape: [[-1.4, -1, 0.35], [1.4, -1, 0.35], [-1.4, 1, 0.35], [1.4, 1, 0.35]] }, // legs
       cabin: { geo: buildCabin(), max: CAP.cabin, mat, coll: 3.2 },
       cave: { geo: buildCave(), max: CAP.cave, mat, coll: 3.0 },
-      rest: { geo: buildRest(), max: CAP.rest, mat, coll: 0 },
-      bench: { geo: buildBench(), max: CAP.bench, mat, coll: 0 },
-      bridge: { geo: buildBridge(), max: CAP.bridge, mat, coll: 0 },
-      arch: { geo: buildArch(), max: CAP.arch, mat, coll: 0 }, // ride-through!
-      fence: { geo: buildFence(), max: CAP.fence, mat, coll: 0 },
-      marker: { geo: buildMarker(), max: CAP.marker, mat, coll: 0 },
+      rest: { geo: buildRest(), max: CAP.rest, mat,
+        shape: [[0, -1.1, 0.5], [0, 0.5, 0.8]] },            // log + fire ring
+      bench: { geo: buildBench(), max: CAP.bench, mat, shape: [[0, 0, 0.9]] },
+      bridge: { geo: buildBridge(), max: CAP.bridge, mat,
+        shape: [[-1.75, -1.62, 0.3], [1.75, -1.62, 0.3],
+                [-1.75, 1.62, 0.3], [1.75, 1.62, 0.3]] },    // rail posts; deck rideable
+      arch: { geo: buildArch(), max: CAP.arch, mat,
+        shape: [[-3.2, 0, 1.15], [3.2, 0, 1.15]] },          // pillars; gate rideable
+      fence: { geo: buildFence(), max: CAP.fence, mat,
+        shape: [[-2.6, 0, 0.55], [-1.3, 0, 0.55], [0, 0, 0.55],
+                [1.3, 0, 0.55], [2.6, 0, 0.55]] },           // solid 6 m run
+      marker: { geo: buildMarker(), max: CAP.marker, mat, shape: [[0, 0, 0.22]] },
     };
     this.meshes = {};
     for (const [k, t] of Object.entries(this.types)) {
@@ -216,7 +228,17 @@ export class Props {
         this.meshes[p.t].setMatrixAt(n, this._m.compose(this._p, this._q, this._s));
         counts[p.t] = n + 1;
         total++;
-        if (t.coll > 0) this.colliders.push({ x: p.x, z: p.z, r: t.coll * p.s });
+        if (t.shape) {
+          const c = Math.cos(p.yaw), sn = Math.sin(p.yaw);
+          for (const [lx, lz, lr] of t.shape) {
+            // Match the instance transform: rotateY(yaw) then translate.
+            const wx = p.x + (lx * c + lz * sn) * p.s;
+            const wz = p.z + (-lx * sn + lz * c) * p.s;
+            this.colliders.push({ x: wx, z: wz, r: lr * p.s });
+          }
+        } else if (t.coll > 0) {
+          this.colliders.push({ x: p.x, z: p.z, r: t.coll * p.s });
+        }
       }
     }
     for (const [k, m] of Object.entries(this.meshes)) {

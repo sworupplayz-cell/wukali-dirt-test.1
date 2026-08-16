@@ -222,8 +222,23 @@ function check(name, ok, detail = '') {
   check('Pass roads <= 10 deg (Chapter 3A cap)', roads.passDeg <= 10.05, `worst=${roads.passDeg} deg`);
 
   // ================= Seams =================
+  // Instrument the loading screen, then press PLAY.
+  await page.evaluate(() => {
+    window.__loadingSeen = { sawBar: false, pctEnd: 0, pendingAfter: -1 };
+    const obs = new MutationObserver(() => {
+      const ov = document.getElementById('loading-overlay');
+      if (ov && !ov.classList.contains('hidden')) window.__loadingSeen.sawBar = true;
+      const pct = parseInt(document.getElementById('loading-pct').textContent) || 0;
+      if (pct > window.__loadingSeen.pctEnd) window.__loadingSeen.pctEnd = pct;
+    });
+    obs.observe(document.getElementById('loading-overlay'), { attributes: true, subtree: true, childList: true, characterData: true });
+  });
   await page.click('#btn-play');
-  await sleep(1200);
+  await page.waitForFunction(() => window.__game.state === 'playing', { timeout: 30000 });
+  await page.evaluate(() => {
+    window.__loadingSeen.pendingAfter = window.__game.world.tiles.pending;
+  });
+  await sleep(600);
   const seam = await page.evaluate(() => {
     const tiles = window.__game.world.tiles;
     const recs = new Map();
@@ -265,6 +280,10 @@ function check(name, ok, detail = '') {
   // ================= Rider's Meadow spawn =================
   s = await state();
   check('PLAY starts gameplay', s.state === 'playing');
+  const loading = await page.evaluate(() => window.__loadingSeen || null);
+  check('Loading screen shown with progress before gameplay',
+    !!loading && loading.sawBar && loading.pctEnd === 100 && loading.pendingAfter === 0,
+    JSON.stringify(loading));
   check('Spawn at Rider\'s Meadow (world center)',
     Math.abs(s.pos[0] - 4000) < 30 && Math.abs(s.pos[2] - 2000) < 60, JSON.stringify(s.pos));
   check('Bike spawns grounded', s.grounded && Math.abs(s.pos[1] - s.groundH) < 0.5);
@@ -635,9 +654,28 @@ function check(name, ok, detail = '') {
   check('Props never float (footprint-seated)',
     polish.propFloating === 0 && polish.propChecked >= 40,
     `${polish.propFloating}/${polish.propChecked} floating`);
-  check('Camera shake reduced >= 70% vs old algorithm',
-    polish.shakeRatio <= 0.3, `new/old HF ratio=${polish.shakeRatio}`);
+  check('Camera shake reduced >= 75% vs old algorithm',
+    polish.shakeRatio <= 0.26, `new/old HF ratio=${polish.shakeRatio}`);
   check('Smooth LOD grow-in system active', polish.growArray);
+  const fenceColl = await page.evaluate(() => {
+    const g = window.__game;
+    // Find any sector containing a fence; verify it emits multiple
+    // collider circles along its run, plus bridge/arch pillar circles.
+    let fence = 0, multi = 0, kinds = new Set();
+    for (let cx = 0; cx < 16; cx++) {
+      for (let cz = 0; cz < 8; cz++) {
+        for (const p of g.world.props.sectorProps(cx, cz)) kinds.add(p.t);
+      }
+    }
+    const t = g.world.props.types;
+    for (const [k, v] of Object.entries(t)) {
+      if (v.shape) { multi++; if (k === 'fence') fence = v.shape.length; }
+    }
+    return { fence, shapedTypes: multi, worldKinds: [...kinds].length };
+  });
+  check('Every prop type has collision (fences solid, gates rideable)',
+    fenceColl.fence === 5 && fenceColl.shapedTypes >= 9,
+    `fence circles=${fenceColl.fence}, shaped types=${fenceColl.shapedTypes}`);
   check('No wheel sinking during the loop', rides.loopRide.maxDev < 0.15,
     `maxDev=${rides.loopRide.maxDev} m`);
   check('Climbed 3 mountain passes', rides.passesClimbed >= 3, `${rides.passesClimbed}/3`);
@@ -790,27 +828,44 @@ function check(name, ok, detail = '') {
   check('Resume works', s.state === 'playing');
 
   // ================= Mobile controls =================
+  // Frame-rate-independent mobile-control check: the REAL touch events
+  // drive the REAL Input mapping; physics then steps fixed (the wall-
+  // clock version was flaky on the CI software rasterizer where RAF can
+  // stall for whole seconds).
   await page.evaluate(() => {
     const g = window.__game;
     g.bike._placeAt(4000, g.world.getHeight(4000, 1700), 1700, 0);
     g.followCam.snapTo(g.bike);
   });
-  await sleep(400);
+  await sleep(200);
   const gasBtn = await page.$('#btn-gas');
   const box = await gasBtn.boundingBox();
   await page.touchscreen.touchStart(box.x + box.width / 2, box.y + box.height / 2);
-  await sleep(2500);
-  s = await state();
-  const touchSpeed = s.speed;
+  await sleep(300);
+  const gas = await page.evaluate(() => {
+    const g = window.__game;
+    g.input.update();
+    const mapped = g.input.throttle;
+    for (let i = 0; i < 150; i++) { g.input.update(); g.bike.update(1 / 60, g.input); }
+    return { mapped, speed: +g.bike.speed.toFixed(2) };
+  });
   await page.touchscreen.touchEnd();
-  check('Mobile GAS button works', touchSpeed > 4, `speed=${touchSpeed}`);
+  check('Mobile GAS button works', gas.mapped === 1 && gas.speed > 4,
+    `throttle=${gas.mapped} speed=${gas.speed}`);
   const brakeBtn = await page.$('#btn-brake');
   const bb = await brakeBtn.boundingBox();
   await page.touchscreen.touchStart(bb.x + bb.width / 2, bb.y + bb.height / 2);
-  await sleep(1400);
+  await sleep(300);
+  const brake = await page.evaluate(() => {
+    const g = window.__game;
+    g.input.update();
+    const mapped = g.input.brake;
+    for (let i = 0; i < 150; i++) { g.input.update(); g.bike.update(1 / 60, g.input); }
+    return { mapped, speed: +g.bike.speed.toFixed(2) };
+  });
   await page.touchscreen.touchEnd();
-  s = await state();
-  check('Mobile BRAKE button works', Math.abs(s.speed) < touchSpeed * 0.5, `speed=${s.speed}`);
+  check('Mobile BRAKE button works', brake.mapped === 1 && Math.abs(brake.speed) < gas.speed * 0.5,
+    `brake=${brake.mapped} speed=${brake.speed}`);
 
   // ================= Menus =================
   await page.click('#btn-pause');

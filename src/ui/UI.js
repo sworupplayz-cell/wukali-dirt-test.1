@@ -24,8 +24,23 @@ export class UI {
     this.stuntToast = $('stunt-toast');
     this.toast = $('toast');
 
-    // Main menu
-    $('btn-play').addEventListener('click', () => game.play());
+    // Main menu + loading screen (Chapter 3D Engine Beta).
+    this.loading = $('loading-overlay');
+    const loadBar = $('loading-bar'), loadPct = $('loading-pct'), loadTip = $('loading-tip');
+    game.onLoadProgress = (f, label) => {
+      const pct = Math.round(f * 100);
+      loadBar.style.width = pct + '%';
+      loadPct.textContent = pct + '%';
+      if (label) loadTip.textContent = label;
+    };
+    $('btn-play').addEventListener('click', () => {
+      this.menu.classList.add('hidden');
+      loadBar.style.width = '0%';
+      loadPct.textContent = '0%';
+      this.loading.classList.remove('hidden');
+      // Let the overlay paint before the warm-up starts.
+      requestAnimationFrame(() => requestAnimationFrame(() => game.play()));
+    });
     $('btn-about').addEventListener('click', () => {
       this.menu.classList.add('hidden');
       this.about.classList.remove('hidden');
@@ -243,6 +258,7 @@ export class UI {
   }
 
   _applyState(s) {
+    if (this.loading && s !== State.MENU) this.loading.classList.add('hidden');
     this.menu.classList.toggle('hidden', s !== State.MENU);
     this.about.classList.add('hidden');
     this.pause.classList.toggle('hidden', s !== State.PAUSED);

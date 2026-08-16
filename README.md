@@ -2,26 +2,23 @@
 
 A lightweight, Android-first, 3D off-road dirt-bike game.
 
-**Current status: Stability & polish pass.** Ten targeted fixes, no
-gameplay/terrain changes: (1-4) rendering glitches — near-plane depth
-precision, bit-identical tile seams, far-backdrop polygonOffset + deeper
-underlay, texel-snapped shadows — all carried over and re-verified; (5-6)
-the third-person camera now uses a CRITICALLY DAMPED SPRING with split
-stiffness (tight horizontal chase omega 9, soft vertical omega 2) plus
-slower altitude smoothing — measured high-frequency shake is 0.294x the
-old algorithm (>= 70% reduction, verified in CI against a live simulation
-of the previous exponential-lerp camera); (7) every placed object has
-proper collision: tree trunks (pine/fir/birch/oak/dead) now feed scaled
-radius colliders into the bike's collision list, merged with prop
-colliders via version-tracked caching; (8) props and trees seat on the
-LOWEST ground across their footprint (slightly sunk) — floating on slopes
-and bump crests is impossible, verified 0/60 floating; (9) LOD swaps are
-smooth: trees entering the near ring GROW IN over ~0.45 s (eased scale
-animation, bounded list, no allocations) instead of appearing full-size;
-(10) streaming frame spikes removed — steady-state tile builds are paced
-1/frame (a boundary crossing drains ~11 hidden-ring tiles over 11 frames),
-bursting only on teleport refills where the backdrop already covers the
-screen.
+**Current status: Chapter 3D — Engine Beta.** The engine milestone build.
+LOADING SCREEN: pressing PLAY now shows a branded loader (progress bar +
+stage labels) while the game preloads the ENTIRE initial tile window
+(11x11 tracked grid incl. the hidden pre-build ring), warms the prop and
+vegetation windows, and runs two warm-up renders (shader compile + buffer
+upload) — gameplay starts with zero pending work and zero first-frame
+hitch (verified: 0 queued builds when the loader closes at 100%). CAMERA:
+spring damping retuned (vertical omega 0.95, slower altitude tracking) —
+measured high-frequency shake is 0.249x the old algorithm (>= 75%
+reduction, CI-verified against a live simulation of the previous camera).
+COLLISION: every prop type now emits proper colliders via per-type LOCAL
+CIRCLE SHAPES rotated with the instance (fence = 5 circles along its 6 m
+run, bridge = 4 rail posts with the deck rideable, stone arch = 2 pillars
+with the gate rideable, lookout = 4 legs, plus signs, benches, markers,
+flags poles, rest logs); solid-body props keep their single-circle bodies
+and scree stays ride-over. Grounding, LOD grow-in, spike-free streaming,
+quality presets and all glitch fixes carry over and are re-verified.
 
 ## Tech
 
