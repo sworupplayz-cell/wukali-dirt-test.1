@@ -4,6 +4,8 @@ import { TerrainField, LAKE } from './TerrainField.js';
 import { TerrainTiles, CELL } from './TerrainTiles.js';
 import { FarTerrain } from './FarTerrain.js';
 import { Props } from './Props.js';
+import { Vegetation } from './Vegetation.js';
+import { skyGradient } from './textures.js';
 
 /**
  * SectorWorld — Horizon Ride fixed-world streaming engine.
@@ -49,6 +51,8 @@ export class SectorWorld {
     // logical sector window (7 draw calls total).
     this.props = new Props(scene, this.field);
     this._propsDirty = true;
+    // Chapter 3B: instanced vegetation (near models + far impostors).
+    this.vegetation = new Vegetation(scene, this.field);
     this._buildLighting(scene);
 
     // Logical 3x3 sector window (Phase 1B architecture, preserved).
@@ -210,6 +214,7 @@ export class SectorWorld {
       this.props.rebuild(ids);
     }
     this.tiles.update(pos.x, pos.z);
+    this.vegetation.update(pos.x, pos.z);
 
     const s = this.sectorAt(pos.x, pos.z);
     this.debug.sectorX = s.x;
@@ -217,6 +222,7 @@ export class SectorWorld {
     this.debug.loaded = this._countLoaded();
     this.debug.tiles = this.tiles.count();
     this.debug.props = this.props.count;
+    this.debug.trees = this.vegetation.visibleNear + this.vegetation.visibleFar;
   }
 
   _sectorEnter(cx, cz) {
@@ -232,16 +238,18 @@ export class SectorWorld {
   }
 
   _buildLighting(scene) {
-    // Chapter 3A: hazier valley sky + exponential-squared fog. FogExp2
-    // reads as a smooth atmospheric GRADIENT (near ground crisp, ranges
-    // increasingly hazy with distance) instead of linear fog's flat ramp,
-    // and it fully hides the far-terrain discard ring near the camera.
-    const sky = new THREE.Color(0x9cc8e4);
-    scene.background = sky;
-    scene.fog = new THREE.FogExp2(sky, 0.00042);
-    scene.add(new THREE.HemisphereLight(0xd4ebff, 0x7d6a44, 0.92));
-    const sun = new THREE.DirectionalLight(0xffedc9, 1.22);
-    sun.position.set(60, 90, 30);
+    // Chapter 3B atmosphere: vertical sky GRADIENT texture (zenith blue ->
+    // pale horizon haze), FogExp2 tinted to the horizon color so terrain
+    // dissolves exactly into the sky band it sits against, WARM low sun +
+    // COOL blue ambient (classic stylized complementary lighting).
+    scene.background = skyGradient();
+    scene.fog = new THREE.FogExp2(new THREE.Color(0xc9dfec), 0.00042);
+    scene.add(new THREE.HemisphereLight(0xbcd6f5, 0x8a7a52, 0.85)); // cool sky / warm bounce
+    const sun = new THREE.DirectionalLight(0xffe3b0, 1.35);         // warm afternoon sun
+    sun.position.set(70, 75, 40);
     scene.add(sun);
+    const fill = new THREE.DirectionalLight(0x9db8e8, 0.22);        // cool counter-fill
+    fill.position.set(-50, 40, -60);
+    scene.add(fill);
   }
 }

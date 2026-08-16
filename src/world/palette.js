@@ -47,15 +47,36 @@ export function colorFor(info, out, x = 0, z = 0) {
   const snow = sstep(1650, 2050, h);
   r += (0.93 - r) * snow; g += (0.95 - g) * snow; b += (0.98 - b) * snow;
 
-  // Dirt road/trail tint with a noise-broken soft edge: the shoulder
-  // dissolves into grass irregularly instead of a clean vector line.
+  // Dirt road/trail tint with a noise-broken soft edge, worn tire paths,
+  // gravel shoulders and scattered small stones (Chapter 3B road wear).
   if (t > 0.003) {
     const edge = (vnoise(x * 0.11, z * 0.11, 919) - 0.5) * 0.5;
     t = Math.min(1, Math.max(0, t + edge * (1 - t) * t * 4));
     const tr = t * (1 - 0.35 * snow);
-    r += (0.55 + patch * 0.04 - r) * tr;
-    g += (0.435 - g) * tr;
-    b += (0.285 - b) * tr;
+    // Base dirt bed.
+    let dr = 0.55 + patch * 0.04, dg = 0.435, db = 0.285;
+    // Worn tire paths: two darker packed strips (t ~ 0.55 either side of
+    // center reads as the wheel lines on every road width).
+    const lane = sstep(0.35, 0.55, t) * (1 - sstep(0.68, 0.88, t));
+    dr -= lane * 0.075; dg -= lane * 0.06; db -= lane * 0.045;
+    // Center crown: lighter loose dirt between the wheel lines.
+    const crown = sstep(0.88, 1, t);
+    dr += crown * 0.035; dg += crown * 0.03; db += crown * 0.02;
+    // Gravel shoulders: grey grit fringe where the bed meets the grass.
+    const shoulder = sstep(0.03, 0.16, t) * (1 - sstep(0.2, 0.4, t));
+    const gv2 = vnoise(x * 0.32, z * 0.32, 929);
+    dr += shoulder * (0.1 + gv2 * 0.1);
+    dg += shoulder * (0.1 + gv2 * 0.09);
+    db += shoulder * (0.11 + gv2 * 0.09);
+    // Small stones: sparse bright speckle on the bed.
+    const stone = vnoise(x * 0.9 + 3.1, z * 0.9 - 7.7, 931);
+    if (stone > 0.78) {
+      const sv = (stone - 0.78) * 2.4;
+      dr += sv * 0.14; dg += sv * 0.13; db += sv * 0.12;
+    }
+    r += (dr - r) * tr;
+    g += (dg - g) * tr;
+    b += (db - b) * tr;
   }
 
   // Ambient wash: very large-scale warm/cool tint (readable regions).

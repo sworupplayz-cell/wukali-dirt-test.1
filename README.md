@@ -2,25 +2,23 @@
 
 A lightweight, Android-first, 3D off-road dirt-bike game.
 
-**Current status: Chapter 3A — Handcrafted road network.** Every road is
-now a named, hand-designed spline and riding them is the game. The network:
-MEADOW LOOP (7 m beginner ring around spawn, gentle 12-gon curves), EAGLE
-PASS ROAD (1.6 km marquee switchback climb, 11+ hairpins, <= 10 deg),
-CANYON TRAIL (2.5 m technical singletrack through the Eastguard canyon to
-the Stone Arch), GLACIER ROUTE (high-altitude crest traverse at ~1000 m
-along the Northwall between two saddles), RIDGE SHORTCUT (hidden connector
-over the NW hill crest), plus the Horizon Loop, four meadow arms and five
-more passes. Rules enforced by construction: every road <= 10 deg, hairpins
-ONLY on passes, min curve radius 18 m elsewhere. Every named road ends at a
-destination (Eagle Eyrie Lookout, Hermit's Cabin, Stone Arch, Prayer Flag
-Hill, Twin Lakes Rest, Rider's Meadow) — no unrewarded dead ends. Roadside
-micro-props (wooden fences, trail markers + the existing signs/flags/
-benches/bridges) instance along the network every ~300 m. Graphics polish:
-grass patch/tussock variation, noise-broken dirt road edges, rock strata,
-large-scale ambient tint (all in the shared vertex palette), FogExp2
-atmospheric gradient. Anti-popping: tile window grew to 9x9 (~560 m) so
-tiles materialize inside the haze over the color-matched far backdrop. F3
-adds road NAME + progress %, road slope and nearest landmark.
+**Current status: Chapter 3B — Art & performance pass.** The world is now
+stylized low-poly hand-painted: a procedural 512x512 shared ground atlas
+(grass/dirt/rock/gravel/snow/mud painted-daub cells) plus a 256px seamless
+neutral detail map world-tiled over the terrain and multiplied with the
+vertex-color palette — brushwork without breaking LOD color matching. Road
+wear is painted into the palette: worn tire paths, center crown, gravel
+shoulders, scattered stones, plus a few cm of wheel-rut/washboard height
+character. Five reusable instanced rock models (cluster, boulder, slab,
+spire, scree) replace the single rock. NEW: the vegetation system — 10
+plant types (pine, fir, birch, small oak, dead tree, bush, fern, grass
+patch, flowers, shrub) as one InstancedMesh per type with a far impostor
+LOD ring (near 5x5 cells full models, far 9x9 cone impostors, ground cover
+distance-culled), deterministic per-cell placement off roads/meadow/lake,
+species by altitude & moisture. Lighting: warm afternoon sun + cool blue
+ambient + cool counter-fill, vertical sky gradient texture, FogExp2 tinted
+to the horizon band. F3 adds TREES (visible/near). All physics, roads,
+terrain shape, streaming, camera, controls and UI untouched.
 
 ## Tech
 

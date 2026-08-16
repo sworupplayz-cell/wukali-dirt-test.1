@@ -22,8 +22,10 @@ import { hash01, mulberry32, hashInt } from './noise.js';
  * existing prop-collider system); flags/signs/rest spots are ride-through.
  */
 
-const CAP = { flags: 48, sign: 48, rocks: 64, lookout: 24, cabin: 32, cave: 24,
-  rest: 48, bench: 32, bridge: 16, arch: 8, fence: 96, marker: 64 };
+const CAP = { flags: 48, sign: 48, lookout: 24, cabin: 32, cave: 24,
+  rest: 48, bench: 32, bridge: 16, arch: 8, fence: 96, marker: 64,
+  // Chapter 3B: 5 reusable rock models (sizes/colors), instanced.
+  rocks: 40, boulder: 28, slab: 28, spire: 20, scree: 40 };
 
 export class Props {
   constructor(scene, field) {
@@ -38,6 +40,10 @@ export class Props {
       flags: { geo: buildFlags(), max: CAP.flags, mat: matD, coll: 0 },
       sign: { geo: buildSignpost(), max: CAP.sign, mat, coll: 0 },
       rocks: { geo: buildRocks(), max: CAP.rocks, mat, coll: 2.6 },
+      boulder: { geo: buildBoulder(), max: CAP.boulder, mat, coll: 2.2 },
+      slab: { geo: buildSlab(), max: CAP.slab, mat, coll: 2.4 },
+      spire: { geo: buildSpire(), max: CAP.spire, mat, coll: 1.4 },
+      scree: { geo: buildScree(), max: CAP.scree, mat, coll: 0 },
       lookout: { geo: buildLookout(), max: CAP.lookout, mat, coll: 0 },
       cabin: { geo: buildCabin(), max: CAP.cabin, mat, coll: 3.2 },
       cave: { geo: buildCave(), max: CAP.cave, mat, coll: 3.0 },
@@ -163,7 +169,9 @@ export class Props {
       } else if (info.mtn > 0.2 && info.mtn < 0.75 && sl < 0.14 && r < 0.5) {
         list.push({ t: 'cabin', x: px, z: pz, y: field.height(px, pz), yaw, s: 0.95 + rng() * 0.15 });
       } else if (sl < 0.3) {
-        list.push({ t: r < 0.7 ? 'rocks' : 'flags', x: px, z: pz, y: field.height(px, pz), yaw, s: 0.8 + rng() * 0.6 });
+        const rockKind = r < 0.3 ? 'rocks' : r < 0.45 ? 'boulder' : r < 0.6 ? 'slab'
+          : r < 0.68 ? 'spire' : r < 0.82 ? 'scree' : 'flags';
+        list.push({ t: rockKind, x: px, z: pz, y: field.height(px, pz), yaw, s: 0.8 + rng() * 0.6 });
       }
     }
 
@@ -205,6 +213,7 @@ export class Props {
 // ---- Low-poly geometry builders (merged, vertex-colored) --------------------
 
 function colored(geo, r, g, b) {
+  if (geo.index) geo = geo.toNonIndexed(); // icosahedrons are non-indexed
   const n = geo.attributes.position.count;
   const col = new Float32Array(n * 3);
   for (let i = 0; i < n; i++) { col[i * 3] = r; col[i * 3 + 1] = g; col[i * 3 + 2] = b; }
@@ -259,6 +268,50 @@ function buildRocks() {
     g.rotateZ(0.12 * ry);
     g.translate(x, y, z);
     parts.push(colored(g, 0.47, 0.44, 0.4));
+  }
+  return mergeGeometries(parts);
+}
+
+/** Boulder: one big rounded granite block, warm grey. */
+function buildBoulder() {
+  const g = new THREE.IcosahedronGeometry(1.7, 0);
+  g.scale(1.15, 0.85, 1.0);
+  g.translate(0, 0.95, 0);
+  return colored(g, 0.52, 0.48, 0.43);
+}
+
+/** Slab: tilted flat sandstone sheets, reddish. */
+function buildSlab() {
+  const parts = [];
+  const spec = [[3.2, 0.6, 2.2, 0, 0.5, 0, 0.18], [2.4, 0.5, 1.8, 0.5, 1.0, 0.3, 0.34], [1.7, 0.4, 1.3, -0.4, 1.45, -0.2, 0.5]];
+  for (const [w, h, d, x, y, z, rz] of spec) {
+    const g = new THREE.BoxGeometry(w, h, d);
+    g.rotateZ(rz);
+    g.rotateY(rz * 2.2);
+    g.translate(x, y, z);
+    parts.push(colored(g, 0.56, 0.44, 0.36));
+  }
+  return mergeGeometries(parts);
+}
+
+/** Spire: tall narrow basalt finger, dark. */
+function buildSpire() {
+  const g = new THREE.ConeGeometry(0.9, 4.2, 5);
+  g.translate(0, 2.0, 0);
+  const b = new THREE.CylinderGeometry(1.1, 1.35, 0.9, 5);
+  b.translate(0, 0.45, 0);
+  return mergeGeometries([colored(g, 0.33, 0.32, 0.34), colored(b, 0.38, 0.37, 0.38)]);
+}
+
+/** Scree: low spread of small pale stones (ride-over, no collider). */
+function buildScree() {
+  const parts = [];
+  for (let i = 0; i < 8; i++) {
+    const r = 0.18 + ((i * 37) % 10) * 0.03;
+    const g = new THREE.IcosahedronGeometry(r, 0);
+    const a = i * 0.785;
+    g.translate(Math.cos(a) * (0.5 + (i % 3) * 0.5), r * 0.55, Math.sin(a) * (0.5 + ((i + 1) % 3) * 0.5));
+    parts.push(colored(g, 0.62, 0.59, 0.53));
   }
   return mergeGeometries(parts);
 }

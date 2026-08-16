@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { ChunkGrid } from './streaming/ChunkGrid.js';
 import { ObjectPool } from './streaming/ObjectPool.js';
 import { colorFor } from './palette.js';
+import { detailTexture } from './textures.js';
 
 /**
  * TerrainTiles (Phase 2) — sculpted terrain rendering for the fixed world.
@@ -42,7 +43,9 @@ const WORLD_W = 8000, WORLD_H = 4000;
 export class TerrainTiles {
   constructor(scene, field) {
     this.field = field;
-    this._mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+    // Chapter 3B: hand-painted detail map multiplied over the vertex-color
+    // palette (one shared 256px canvas texture, world-space tiled UVs).
+    this._mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: detailTexture() });
     this._pool = new ObjectPool(() => this._makeMesh(scene), POOL);
     this._grid = new ChunkGrid(TILE, RADIUS);
     this._queue = [];
@@ -122,6 +125,7 @@ export class TerrainTiles {
     const pos = mesh.geometry.attributes.position.array;
     const col = mesh.geometry.attributes.color.array;
     const nor = mesh.geometry.attributes.normal.array;
+    const uv = mesh.geometry.attributes.uv.array;
 
     // Sample pass: interior vertices get full info (color), the 1-cell
     // border ring only height (for normals).
@@ -156,6 +160,10 @@ export class TerrainTiles {
         pos[v * 3] = i * CELL;
         pos[v * 3 + 1] = grid[gi];
         pos[v * 3 + 2] = j * CELL;
+        // World-space painted-detail UV: 1 repeat per 24 m, exact across
+        // tile borders because it derives from world coordinates.
+        uv[v * 2] = (ox + i * CELL) / 24;
+        uv[v * 2 + 1] = (oz + j * CELL) / 24;
         let nx = (grid[gi - 1] - grid[gi + 1]) * inv;
         let nz = (grid[gi - G] - grid[gi + G]) * inv;
         const il = 1 / Math.hypot(nx, 1, nz);
@@ -171,6 +179,7 @@ export class TerrainTiles {
     mesh.geometry.attributes.position.needsUpdate = true;
     mesh.geometry.attributes.color.needsUpdate = true;
     mesh.geometry.attributes.normal.needsUpdate = true;
+    mesh.geometry.attributes.uv.needsUpdate = true;
     const half = TILE / 2;
     mesh.geometry.boundingSphere.center.set(half, (minH + maxH) / 2, half);
     mesh.geometry.boundingSphere.radius = Math.hypot(half * 1.42, (maxH - minH) / 2);
@@ -204,6 +213,7 @@ function buildTileGeometry() {
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
   geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
   geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(count * 2), 2));
   const idx = [];
   for (let j = 0; j < RES; j++) {
     for (let i = 0; i < RES; i++) {

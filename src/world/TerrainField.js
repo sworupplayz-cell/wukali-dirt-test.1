@@ -139,6 +139,13 @@ export class TerrainField {
 
     trail = Math.max(trail, L.road);
     h -= 0.22 * trail; // worn bed
+    // Chapter 3B: slight surface variation on the bed — wheel ruts a few
+    // cm deep + gentle washboard. Visual character only; far below the
+    // suspension's bump scale, so the ride stays smooth.
+    if (trail > 0.3) {
+      h -= 0.05 * trail * (0.5 + 0.5 * Math.sin(x * 0.9 + z * 1.7));
+      h -= 0.03 * trail * vnoise(x * 0.23, z * 0.23, SEED + 61);
+    }
 
     out.h = h;
     out.trail = trail;

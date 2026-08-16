@@ -50,6 +50,7 @@ export class DebugOverlay {
       `X ${p.x.toFixed(1)}  Z ${p.z.toFixed(1)}\n` +
       `SECTOR (${d.sectorX},${d.sectorZ})\n` +
       `LOADED ${d.loaded}  TILES ${d.tiles ?? 0}  PROPS ${d.props ?? 0}\n` +
+      `TREES ${d.trees ?? 0} (near ${g.world.vegetation ? g.world.vegetation.visibleNear : 0})\n` +
       `ELEVATION ${groundH.toFixed(1)} m\n` +
       `ALTITUDE ${Math.max(0, p.y - groundH).toFixed(2)} m\n` +
       `SLOPE ${(slope * 100).toFixed(0)}%  (${(Math.atan(slope) * 180 / Math.PI).toFixed(1)}\u00B0)\n` +

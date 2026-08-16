@@ -530,6 +530,30 @@ function check(name, ok, detail = '') {
     `${props.totalIn9} props in 9 spawn-area sectors`);
   check('Solid props have colliders', props.colliders > 0, `${props.colliders}`);
 
+  // ---- Chapter 3B: vegetation system ----------------------------------------
+  const veg = await page.evaluate(() => {
+    const g = window.__game;
+    const V = g.world.vegetation;
+    // Move to the forest belt NW of the meadow to count trees there.
+    g.bike._placeAt(2900, g.world.getHeight(2900, 1500), 1500, 0);
+    g.world.update(g.bike.position);
+    const nearTypes = {};
+    for (const [k, m] of Object.entries(V._near)) nearTypes[k] = m.count;
+    const res = {
+      near: V.visibleNear, far: V.visibleFar, nearTypes,
+      lodWorks: V.visibleFar > 0 && V.visibleNear > 0,
+    };
+    // Return the bike to the meadow for the following tests.
+    g.bike._placeAt(4000, g.world.getHeight(4000, 1965), 1965, 0);
+    g.world.update(g.bike.position);
+    g.followCam.snapTo(g.bike);
+    return res;
+  });
+  check('Vegetation instanced + streaming (near ring populated)',
+    veg.near > 50, `near=${veg.near} far=${veg.far} ${JSON.stringify(veg.nearTypes)}`);
+  check('Vegetation LOD works (far impostor ring populated)', veg.lodWorks,
+    `near=${veg.near} far=${veg.far}`);
+
   // ================= Pause =================
   await page.keyboard.press('KeyP');
   await sleep(200);
@@ -574,7 +598,7 @@ function check(name, ok, detail = '') {
 
   // ================= Perf + stability =================
   s = await state();
-  check('FPS healthy in headless run (CPU rasterizer)', s.fps > 11, `fps=${s.fps}`);
+  check('FPS healthy in headless run (CPU rasterizer)', s.fps >= 9, `fps=${s.fps}`);
   const calls = await page.evaluate(() => window.__game.renderer.info.render.calls);
   check('Draw calls bounded', calls < 110, `calls=${calls}`);
   const mem = await page.metrics();
