@@ -41,7 +41,7 @@ const CELL = TILE / RES;
 const RADIUS = 5;            // 11x11 grid window (outermost ring hidden)
 const VIS_R = 4;             // 9x9 visible window
 const POOL = 125;            // 121 + spare
-const WORLD_W = 8000, WORLD_H = 4000;
+const WORLD_W = 8000, WORLD_H = 5000;
 
 export class TerrainTiles {
   constructor(scene, field) {

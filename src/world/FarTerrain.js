@@ -19,7 +19,7 @@ import { colorFor } from './palette.js';
  */
 
 const STEP = 62.5; // 160x80 world grid (exact binary) — ~25 k triangles total
-const W = 8000, H = 4000;
+const W = 8000, H = 5000;
 const CHUNKS_X = 2, CHUNKS_Z = 2;
 const DISCARD_NEAR = 330; // near tile window worst-case covers 375 m
 

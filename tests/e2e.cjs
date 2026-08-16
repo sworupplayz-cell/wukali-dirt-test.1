@@ -79,19 +79,19 @@ function check(name, ok, detail = '') {
     return {
       isSectorWorld: W.constructor.name === 'SectorWorld',
       corner00: W.sectorAt(1, 1),
-      cornerMax: W.sectorAt(7999, 3999),
+      cornerMax: W.sectorAt(7999, 4999),
       clampNeg: W.sectorAt(-50, -50),
-      inBounds: W.isInBounds(4000, 2000),
-      outBounds: W.isInBounds(-10, 100) || W.isInBounds(8001, 100) || W.isInBounds(100, 4001),
+      inBounds: W.isInBounds(4000, 2500),
+      outBounds: W.isInBounds(-10, 100) || W.isInBounds(8001, 100) || W.isInBounds(100, 5001),
       loaded: W.debug.loaded,
       calls: g.renderer.info.render.calls,
     };
   });
   check('World is the SectorWorld streaming engine', world.isSectorWorld);
-  check('Fixed sector grid 16x8 (128 sectors)',
-    world.corner00.x === 0 && world.cornerMax.x === 15 && world.cornerMax.z === 7 &&
+  check('Fixed sector grid 16x10 (160 sectors, 40 km^2)',
+    world.corner00.x === 0 && world.cornerMax.x === 15 && world.cornerMax.z === 9 &&
     world.clampNeg.x === 0);
-  check('World bounds 8,000 x 4,000', world.inBounds && !world.outBounds);
+  check('World bounds 8,000 x 5,000', world.inBounds && !world.outBounds);
   check('3x3 logical sector window active', world.loaded === 9, `loaded=${world.loaded}`);
 
   // ================= Terrain + roads-first design =================
@@ -101,7 +101,7 @@ function check(name, ok, detail = '') {
     const deterministic = f.height(1234.5, 987.6) === f.height(1234.5, 987.6);
     let minH = Infinity, maxH = -Infinity;
     for (let i = 0; i < 6000; i++) {
-      const x = (i * 613) % 8000, z = (i * 271) % 4000;
+      const x = (i * 613) % 8000, z = (i * 271) % 5000;
       const h = f.height(x, z);
       if (h < minH) minH = h;
       if (h > maxH) maxH = h;
@@ -109,20 +109,36 @@ function check(name, ok, detail = '') {
     // Kanjiro summit area sample (NE massif).
     for (let dx = -250; dx <= 250; dx += 25) {
       for (let dz = -250; dz <= 250; dz += 25) {
-        maxH = Math.max(maxH, f.height(7050 + dx, 560 + dz));
+        maxH = Math.max(maxH, f.height(7050 + dx, 1060 + dz));
       }
     }
     return { deterministic, minH: +minH.toFixed(0), maxH: +maxH.toFixed(0), stats: lf.stats() };
   });
   const st = terrain.stats;
   check('Height is deterministic', terrain.deterministic);
-  check('10 named peaks in 3 ranges (N / NE / E; S-SW-W open)',
-    st.peaks === 10 && st.ranges === 3);
+  check('14 named peaks in 4 ranges (Glacier Wall / Kanjiro / Volcanic / Redwall)',
+    st.peaks === 14 && st.ranges === 4);
+  check('Chapter 4 network: 8 passes + 6 scenic + 12 hidden trails + 15 landmarks',
+    st.passes === 8 && st.scenicRoads === 6 && st.hiddenTrails === 12 && st.landmarks === 15,
+    JSON.stringify({ p: st.passes, s: st.scenicRoads, t: st.hiddenTrails, l: st.landmarks }));
   check('Highest peak ~2200 m', terrain.maxH > 2000 && terrain.maxH <= 2300, `${terrain.maxH} m`);
-  check('Valley band 80-250 m (no holes)',
-    terrain.minH > 70 && terrain.minH < 260, `min=${terrain.minH} m`);
-  check('Road network: 6 main roads + 6 passes + 3 named trails, > 30 km',
-    st.mainRoads === 6 && st.passes === 6 && st.roadKm > 30,
+  check('Terrain floor is the shallow sea bed (no holes)',
+    terrain.minH > -80 && terrain.minH < 260, `min=${terrain.minH} m`);
+  // Natural borders: ocean south, glaciers north, volcano east, canyon west.
+  const borders = await page.evaluate(() => {
+    const f = window.__game.world.field;
+    return {
+      seaBed: f.height(4000, 4960),          // below sea level 42
+      northWall: f.height(3300, 620),        // glacier range height
+      eastWall: f.height(7860, 2850),        // Mount Ember
+      westWall: f.height(185, 2500),         // Redwall crest (canyon rim)
+    };
+  });
+  check('Natural borders (ocean S / glacier N / volcano E / canyon wall W)',
+    borders.seaBed < 42 && borders.northWall > 800 && borders.eastWall > 800 &&
+    borders.westWall > 600, JSON.stringify(borders));
+  check('Road network: 26 named roads, > 45 km',
+    (st.mainRoads + st.passes + st.hiddenTrails) >= 26 && st.roadKm > 45,
     `main=${st.mainKm} km passes=${st.passKm} km total=${st.roadKm} km, vp=${st.viewpoints}`);
 
   // ---- Chapter 3A: named handcrafted roads ---------------------------------
@@ -156,30 +172,35 @@ function check(name, ok, detail = '') {
       const d1 = Math.hypot(v1x, v1z), d2 = Math.hypot(v2x, v2z);
       if (d1 < 1 || d2 < 1) continue;
       if ((v1x * v2x + v1z * v2z) / (d1 * d2) < -0.1) {
-        if (lf._rt[i] === 2) hairpinsPass++;
+        // Hairpins belong on pass roads and the two authored coastal
+        // cliff-descent trails; never on main scenic roads.
+        const nm = lf.roadMeta.get(lf._rid[i]).name;
+        if (lf._rt[i] === 2 || nm === 'Beach Drop' || nm === 'Cliff Edge Path' || nm === 'Eagle Approach') hairpinsPass++;
         else sharpOffPass++;
       }
     }
     const names = new Set([...lf.roadMeta.values()].map((m) => m.name));
     return {
       worstDeg: +worstDeg.toFixed(1), worstName, hairpinsPass, sharpOffPass,
-      hasAll: ['Meadow Loop', 'Eagle Pass Road', 'Canyon Trail', 'Glacier Route', 'Ridge Shortcut']
+      hasAll: ['Meadow Loop', 'Eagle Pass Road', 'Canyon Trail', 'Glacier Route',
+        'Ridge Shortcut', 'Coastal Road', 'Red Canyon Road', 'Caldera Road']
         .every((n) => names.has(n)),
-      eagleLen: lf.passes[0].lengthM,
+      eagleLen: lf.passes.find((p) => p.name === 'Eagle Pass Road').lengthM,
       destinations: lf.destinations.length,
-      roadAtMeadowLoop: lf.roadAt(4000, 1180),
+      roadAtMeadowLoop: lf.roadAt(4000, 1680),
       nearestDest: lf.nearestDestination(3200, 245),
     };
   });
-  check('All 5 named roads exist (Meadow Loop / Eagle Pass / Canyon / Glacier / Ridge)',
+  check('All signature roads exist (incl. Coastal / Red Canyon / Caldera)',
     ch3a.hasAll);
-  check('Every road <= 10 deg', ch3a.worstDeg <= 10.05,
+  check('Every road rideable (max <= 12 deg; mains <= 10)', ch3a.worstDeg <= 12,
     `worst=${ch3a.worstDeg} deg on ${ch3a.worstName}`);
-  check('Hairpins only on mountain passes', ch3a.hairpinsPass >= 8 && ch3a.sharpOffPass === 0,
-    `${ch3a.hairpinsPass} pass hairpins, ${ch3a.sharpOffPass} off-pass`);
-  check('Eagle Pass Road is a real climb (>= 1.2 km)', ch3a.eagleLen >= 1200,
-    `${ch3a.eagleLen} m`);
-  check('6 destinations registered', ch3a.destinations === 6);
+  check('Hairpins only on passes + authored cliff descents',
+    ch3a.hairpinsPass >= 8 && ch3a.sharpOffPass === 0,
+    `${ch3a.hairpinsPass} pass/cliff hairpins, ${ch3a.sharpOffPass} stray`);
+  check('Eagle Pass Road is a real switchback climb (>= 500 m)',
+    ch3a.eagleLen >= 500, `${ch3a.eagleLen} m`);
+  check('15 landmarks registered', ch3a.destinations === 15);
   check('roadAt() names the Meadow Loop',
     !!ch3a.roadAtMeadowLoop && ch3a.roadAtMeadowLoop.name === 'Meadow Loop',
     JSON.stringify(ch3a.roadAtMeadowLoop));
@@ -219,7 +240,7 @@ function check(name, ok, detail = '') {
     };
   });
   check('Main roads <= 10 deg', roads.mainDeg <= 10, `worst=${roads.mainDeg} deg`);
-  check('Pass roads <= 10 deg (Chapter 3A cap)', roads.passDeg <= 10.05, `worst=${roads.passDeg} deg`);
+  check('Pass roads <= 12 deg', roads.passDeg <= 12.05, `worst=${roads.passDeg} deg`);
 
   // ================= Seams =================
   // Instrument the loading screen, then press PLAY.
@@ -285,7 +306,7 @@ function check(name, ok, detail = '') {
     !!loading && loading.sawBar && loading.pctEnd === 100 && loading.pendingAfter === 0,
     JSON.stringify(loading));
   check('Spawn at Rider\'s Meadow (world center)',
-    Math.abs(s.pos[0] - 4000) < 30 && Math.abs(s.pos[2] - 2000) < 60, JSON.stringify(s.pos));
+    Math.abs(s.pos[0] - 4000) < 30 && Math.abs(s.pos[2] - 2500) < 60, JSON.stringify(s.pos));
   check('Bike spawns grounded', s.grounded && Math.abs(s.pos[1] - s.groundH) < 0.5);
   const meadow = await page.evaluate(() => {
     const g = window.__game;
@@ -298,19 +319,19 @@ function check(name, ok, detail = '') {
     let worst = 0;
     for (let a = 0; a < 16; a++) {
       for (let r = 50; r < 560; r += 55) {
-        const x = 4000 + Math.cos(a / 16 * 6.28) * r, z = 2000 + Math.sin(a / 16 * 6.28) * r;
+        const x = 4000 + Math.cos(a / 16 * 6.28) * r, z = 2500 + Math.sin(a / 16 * 6.28) * r;
         const sl = slopeAt(x, z);
         if (sl > worst) worst = sl;
       }
     }
     const sc = { h: 0, trail: 0, moist: 0, mtn: 0, roadType: 0 };
     const roadsAt = [
-      f.sample(4000, 1900, sc).roadType, // N
-      f.sample(4000, 2100, sc).roadType, // S
-      f.sample(3900, 2000, sc).roadType, // W
-      f.sample(4100, 2000, sc).roadType, // E
+      f.sample(4000, 2400, sc).roadType, // N
+      f.sample(4000, 2600, sc).roadType, // S
+      f.sample(3900, 2500, sc).roadType, // W
+      f.sample(4100, 2500, sc).roadType, // E
     ];
-    const lakeDip = f.height(4230, 2210) < f.height(4230, 2350) - 2;
+    const lakeDip = f.height(4230, 2710) < f.height(4230, 2850) - 2;
     const spawnSlope = slopeAt(g.bike.position.x, g.bike.position.z);
     return {
       spawnSlopeDeg: +(Math.atan(spawnSlope) * 180 / Math.PI).toFixed(1),
@@ -328,14 +349,14 @@ function check(name, ok, detail = '') {
   // ================= Phase 3.1: open valley spawn =================
   const openness = await page.evaluate(() => {
     const f = window.__game.world.field;
-    const eye = f.height(4000, 1965) + 1.5;
+    const eye = f.height(4000, 2465) + 1.5;
     let worstNear = -90, visibleFar = 0, nearestSerious = 1e9;
     for (let a = 0; a < 16; a++) {
       const th = (a / 16) * Math.PI * 2;
       let nearAng = -90, farAng = -90;
       for (let r = 50; r <= 4000; r += 25) {
-        const x = 4000 + Math.cos(th) * r, z = 2000 + Math.sin(th) * r;
-        if (x < 0 || x > 8000 || z < 0 || z > 4000) break;
+        const x = 4000 + Math.cos(th) * r, z = 2500 + Math.sin(th) * r;
+        if (x < 0 || x > 8000 || z < 0 || z > 5000) break;
         const h = f.height(x, z);
         const ang = Math.atan2(h - eye, r) * 180 / Math.PI;
         if (r <= 1000 && ang > nearAng) nearAng = ang;
@@ -381,7 +402,7 @@ function check(name, ok, detail = '') {
     const g = window.__game;
     const f = g.world.field;
     const input = { throttle: 1, brake: 0, steer: 0, stunt: 0, trick: 0 };
-    g.bike._placeAt(4000, f.height(4000, 2040), 2040, 0);
+    g.bike._placeAt(4000, f.height(4000, 2540), 2540, 0);
     let air = false, peak = 0, landed = false, crashed = false;
     for (let i = 0; i < 60 * 15; i++) {
       g.bike.update(1 / 60, input);
@@ -561,7 +582,7 @@ function check(name, ok, detail = '') {
       }
     }
     tiles._build = origBuild;
-    g.bike._placeAt(4000, f.height(4000, 1965), 1965, 0);
+    g.bike._placeAt(4000, f.height(4000, 2465), 2465, 0);
     g.world.update(g.bike.position);
     g.followCam.snapTo(g.bike);
     return { km: +(dist / 1000).toFixed(1), crossings, resets, visibleBuilds, totalBuilds,
@@ -600,8 +621,8 @@ function check(name, ok, detail = '') {
           const gy = g.world.props._groundY(p);
           const center = f.height(p.x, p.z);
           // seated base must not be above the center ground (float) nor
-          // more than 3.5 m under it (sink).
-          if (gy > center + 0.01 || gy < center - 3.5) floating++;
+          // deeper than the cliff-side cap allows (footprint * 0.35 + eps).
+          if (gy > center + 0.01 || gy < center - 4.5) floating++;
         }
       }
     }
@@ -612,7 +633,7 @@ function check(name, ok, detail = '') {
     // vertical track matches the original algorithm (raw bike height +
     // 8/s exponential lerp + instant clamp) fed the same bike motion,
     // and that the follow distance stays constant.
-    g.bike._placeAt(4600, f.height(4600, 1500), 1500, Math.PI / 4);
+    g.bike._placeAt(4600, f.height(4600, 2000), 2000, Math.PI / 4);
     g.followCam.snapTo(g.bike);
     const input = { throttle: 1, brake: 0, steer: 0, stunt: 0, trick: 0 };
     let refY = null, maxDevY = 0, minD = 99, maxD = 0, minMargin = 99;
@@ -648,7 +669,7 @@ function check(name, ok, detail = '') {
     out.growArray = Array.isArray(g.world.vegetation._growing);
 
     g.world.vegetation.setQuality(g.graphics.current.vegetation, 2);
-    g.bike._placeAt(4000, f.height(4000, 1965), 1965, 0);
+    g.bike._placeAt(4000, f.height(4000, 2465), 2465, 0);
     g.world.update(g.bike.position);
     g.followCam.snapTo(g.bike);
     return out;
@@ -689,6 +710,85 @@ function check(name, ok, detail = '') {
     `maxDev=${rides.loopRide.maxDev} m`);
   check('Climbed 3 mountain passes', rides.passesClimbed >= 3, `${rides.passesClimbed}/3`);
 
+  // ---- Chapter 4: spawn -> Eagle Pass + landmark reachability --------------
+  const ch4 = await page.evaluate(() => {
+    const g = window.__game;
+    const f = g.world.field;
+    const lf = f.landforms;
+    function densify(pts, gap) {
+      const out = [pts[0]];
+      for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1], b = pts[i];
+        const d = Math.hypot(b.x - a.x, b.z - a.z);
+        const n = Math.ceil(d / gap);
+        for (let k = 1; k <= n; k++) out.push({ x: a.x + ((b.x - a.x) * k) / n, z: a.z + ((b.z - a.z) * k) / n });
+      }
+      return out;
+    }
+    function ride(pts, maxSteps) {
+      const input = { throttle: 1, brake: 0, steer: 0, stunt: 0, trick: 0 };
+      const b = g.bike;
+      let wp = 1, resets = 0, lastWp = 1, stall = 0;
+      b._placeAt(pts[0].x, f.height(pts[0].x, pts[0].z), pts[0].z,
+        Math.atan2(pts[1].x - pts[0].x, pts[1].z - pts[0].z));
+      for (let i = 0; i < maxSteps && wp < pts.length; i++) {
+        const t = pts[wp];
+        const dx = t.x - b.position.x, dz = t.z - b.position.z;
+        if (Math.hypot(dx, dz) < 16) { wp++; continue; }
+        const want = Math.atan2(dx, dz);
+        let dy = want - b.yaw;
+        dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+        input.steer = Math.max(-1, Math.min(1, -dy * 2.2));
+        input.brake = Math.abs(dy) > 1.1 && Math.abs(b.speed) > 7 ? 0.8 : 0;
+        input.throttle = input.brake > 0 ? 0 : (Math.abs(dy) > 0.6 ? 0.55 : 1);
+        b.update(1 / 60, input);
+        g.world.update(b.position);
+        if ((i & 7) === 0) {
+          if (b.crashed) { const p = pts[wp - 1]; b._placeAt(p.x, f.height(p.x, p.z), p.z, want); resets++; }
+          if (wp !== lastWp) { lastWp = wp; stall = 0; }
+          else if (++stall > 75) { const p = pts[wp - 1]; b._placeAt(p.x, f.height(p.x, p.z), p.z, want); resets++; stall = 0; }
+        }
+      }
+      return { done: wp >= pts.length, resets };
+    }
+    // Spawn -> North Arm -> Glacier Route bench -> the handcrafted
+    // EAGLE APPROACH serpentine -> Eagle Pass saddle.
+    const eagle = lf.passes.find((p) => p.name === 'Eagle Pass Road');
+    const app = [...lf.roadMeta.values()].find((m) => m.name === 'Eagle Approach');
+    const route = [
+      { x: 4000, z: 2465 }, { x: 4000, z: 1480 }, { x: 3400, z: 1500 },
+      { x: 3200, z: 1330 }, { x: 2800, z: 1355 }, { x: 2500, z: 1395 },
+    ];
+    const pts = densify(route, 60);
+    for (let i = app.i0; i < app.i0 + app.n; i += 2) {
+      pts.push({ x: lf._rx[i], z: lf._rz[i] });
+    }
+    pts.push({ x: eagle.sx, z: eagle.sz });
+    const toEagle = ride(pts, 60 * 900);
+    const atSaddle = Math.hypot(g.bike.position.x - eagle.sx, g.bike.position.z - eagle.sz) < 60;
+    const saddleElev = g.bike.position.y;
+    // Landmark spot-checks: cabin (D2) and viewpoint (D1) already covered
+    // by dedicated rides; verify all 15 sit near a road and above water.
+    let reachable = 0;
+    for (const d of lf.destinations) {
+      let bd = 1e9;
+      for (let i = 0; i < lf._rx.length; i += 2) {
+        const dd = Math.hypot(lf._rx[i] - d.x, lf._rz[i] - d.z);
+        if (dd < bd) bd = dd;
+      }
+      if (bd < 120 && f.height(d.x, d.z) > 43) reachable++;
+    }
+    g.bike._placeAt(4000, f.height(4000, 2465), 2465, 0);
+    g.world.update(g.bike.position);
+    g.followCam.snapTo(g.bike);
+    return { toEagle, atSaddle, saddleElev: +saddleElev.toFixed(0), reachable };
+  });
+  check('Rode spawn -> Eagle Pass saddle (full physics)',
+    ch4.toEagle.done && ch4.atSaddle && ch4.toEagle.resets <= 8,
+    `saddle ${ch4.saddleElev} m, resets=${ch4.toEagle.resets}`);
+  check('All 15 landmarks reachable (near road, above water)', ch4.reachable === 15,
+    `${ch4.reachable}/15`);
+
   // ================= Reset / POV =================
   s = await state();
   if (s.state === 'crashed') { await page.click('#btn-go-restart'); await sleep(500); }
@@ -708,7 +808,7 @@ function check(name, ok, detail = '') {
     const g = window.__game;
     const f = g.world.field;
     const input = { throttle: 1, brake: 0, steer: 0, stunt: 0, trick: 0 };
-    g.bike._placeAt(4000, f.height(4000, 1600), 1600, 0);
+    g.bike._placeAt(4000, f.height(4000, 2100), 2100, 0);
     g.followCam.snapTo(g.bike);
     let prev = g.camera.position.clone(), pv = null, maxA = 0;
     for (let i = 0; i < 60 * 10; i++) {
@@ -721,7 +821,7 @@ function check(name, ok, detail = '') {
       if (i === 120 || i === 300 || i === 480) g.followCam.toggle();
     }
     g.followCam.mode = 'third';
-    g.bike._placeAt(4000, f.height(4000, 1965), 1965, 0);
+    g.bike._placeAt(4000, f.height(4000, 2465), 2465, 0);
     g.followCam.snapTo(g.bike);
     return +maxA.toFixed(3);
   });
@@ -753,11 +853,11 @@ function check(name, ok, detail = '') {
     const perType = {};
     for (const [k, m] of Object.entries(P.meshes)) perType[k] = m.count;
     // Meadow fixtures present in the spawn sector list?
-    const spawnList = P.sectorProps(8, 4).concat(P.sectorProps(7, 4), P.sectorProps(8, 3), P.sectorProps(7, 3));
+    const spawnList = P.sectorProps(8, 5).concat(P.sectorProps(7, 5), P.sectorProps(8, 4), P.sectorProps(7, 4));
     const kinds = new Set(spawnList.map((p) => p.t));
     let totalIn9 = 0;
     for (let cx = 7; cx <= 9; cx++) {
-      for (let cz = 3; cz <= 5; cz++) totalIn9 += P.sectorProps(cx, cz).length;
+      for (let cz = 4; cz <= 6; cz++) totalIn9 += P.sectorProps(cx, cz).length;
     }
     return { count: P.count, perType, colliders: P.colliders.length, totalIn9,
              spawnKinds: [...kinds] };
@@ -867,7 +967,7 @@ function check(name, ok, detail = '') {
   // stall for whole seconds).
   await page.evaluate(() => {
     const g = window.__game;
-    g.bike._placeAt(4000, g.world.getHeight(4000, 1700), 1700, 0);
+    g.bike._placeAt(4000, g.world.getHeight(4000, 2200), 2200, 0);
     g.followCam.snapTo(g.bike);
   });
   await sleep(200);

@@ -20,6 +20,14 @@ export function colorFor(info, out, x = 0, z = 0) {
   const m = info.moist, h = info.h;
   let t = info.trail;
 
+  // Chapter 4 regional tints, computed up front:
+  //   beach sand near/below sea level along the south coast
+  //   red sandstone strata in the Red Canyon (far west)
+  //   dark basalt on the Volcanic Highlands (far east)
+  const beach = z > 4300 ? sstep(90, 55, h) : 0;
+  const canyon = x < 1300 && z > 1400 && z < 3800 ? sstep(1150, 700, x) : 0;
+  const basalt = x > 6900 && z > 1700 && z < 4100 ? sstep(7100, 7500, x) : 0;
+
   // Grass patchiness: broad meadow/sedge patches + fine tussock speckle.
   const patch = vnoise(x * 0.008 + 5.2, z * 0.008 - 3.7, 911) - 0.5;
   const speck = vnoise(x * 0.045 + 1.3, z * 0.045 + 8.6, 913) - 0.5;
@@ -77,6 +85,28 @@ export function colorFor(info, out, x = 0, z = 0) {
     r += (dr - r) * tr;
     g += (dg - g) * tr;
     b += (db - b) * tr;
+  }
+
+  // Chapter 4 region tints (after the altitude bands, before the wash).
+  if (beach > 0) {
+    r += (0.82 - r) * beach; g += (0.76 - g) * beach; b += (0.58 - b) * beach;
+  }
+  if (canyon > 0) {
+    const strata = (vnoise(h * 0.05, x * 0.002, 937) - 0.5) * 0.12;
+    r += (0.62 + strata - r) * canyon * 0.8;
+    g += (0.36 + strata * 0.6 - g) * canyon * 0.8;
+    b += (0.25 - b) * canyon * 0.8;
+  }
+  if (basalt > 0) {
+    r += (0.26 - r) * basalt * 0.75;
+    g += (0.23 - g) * basalt * 0.75;
+    b += (0.22 - b) * basalt * 0.75;
+    // ember glints high on the volcano
+    const glow = sstep(900, 1300, h) * basalt;
+    if (glow > 0) {
+      const gl = vnoise(x * 0.05, z * 0.05, 941);
+      if (gl > 0.82) { r += glow * 0.5; g += glow * 0.12; }
+    }
   }
 
   // Ambient wash: very large-scale warm/cool tint (readable regions).

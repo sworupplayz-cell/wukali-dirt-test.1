@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { ChunkGrid } from './streaming/ChunkGrid.js';
-import { TerrainField, LAKE } from './TerrainField.js';
+import { TerrainField, LAKE, LAKES, SEA_LEVEL } from './TerrainField.js';
 import { TerrainTiles, CELL } from './TerrainTiles.js';
 import { FarTerrain } from './FarTerrain.js';
 import { Props } from './Props.js';
@@ -35,7 +35,7 @@ import { skyGradient } from './textures.js';
 
 export const SECTOR_SIZE = 500;
 export const WORLD_COLS = 16;
-export const WORLD_ROWS = 8;
+export const WORLD_ROWS = 10; // Chapter 4: 8000 x 5000 = 40 km^2
 export const WORLD_W = SECTOR_SIZE * WORLD_COLS; // 8,000 m
 export const WORLD_H = SECTOR_SIZE * WORLD_ROWS; // 4,000 m
 const STREAM_RADIUS = 1; // 3x3 logical sector window
@@ -63,20 +63,34 @@ export class SectorWorld {
 
     // Rider's Meadow spawn: on the North-South road just above the 4-way
     // intersection at the exact world center, facing the crossroads.
-    const sx = 4000, sz = 1965;
+    const sx = 4000, sz = 2465;
     this._spawn = { x: sx, y: this.field.height(sx, sz), z: sz, yaw: 0 }; // facing the crossroads + practice jump
 
-    // Rider's Meadow lake: one static water disc (1 draw call) floating
-    // in the handcrafted lake bowl.
-    const water = new THREE.Mesh(
-      new THREE.CircleGeometry(LAKE.r * 0.92, 28),
-      new THREE.MeshLambertMaterial({ color: 0x3f7fae, transparent: true, opacity: 0.88 })
+    // Lakes: one static water disc each (1 draw call apiece).
+    const waterMat = new THREE.MeshLambertMaterial({
+      color: 0x3f7fae, transparent: true, opacity: 0.88,
+    });
+    for (const l of LAKES) {
+      const water = new THREE.Mesh(new THREE.CircleGeometry(l.r * 0.92, 28), waterMat);
+      water.rotation.x = -Math.PI / 2;
+      water.position.set(l.x, this.field.height(l.x, l.z) + l.depth * 0.45, l.z);
+      water.matrixAutoUpdate = false;
+      water.updateMatrix();
+      scene.add(water);
+    }
+    // Chapter 4: the southern OCEAN — one large plane at sea level along
+    // the coast (the south border; riding in beaches at the shallows and
+    // the bike's y<-150/out-of-bounds failsafe never triggers because
+    // the sea floor stays shallow).
+    const sea = new THREE.Mesh(
+      new THREE.PlaneGeometry(WORLD_W + 4000, 1400),
+      new THREE.MeshLambertMaterial({ color: 0x2e6da0, transparent: true, opacity: 0.92 })
     );
-    water.rotation.x = -Math.PI / 2;
-    water.position.set(LAKE.x, this.field.height(LAKE.x, LAKE.z) + LAKE.depth * 0.45, LAKE.z);
-    water.matrixAutoUpdate = false;
-    water.updateMatrix();
-    scene.add(water);
+    sea.rotation.x = -Math.PI / 2;
+    sea.position.set(WORLD_W / 2, SEA_LEVEL, WORLD_H - 300);
+    sea.matrixAutoUpdate = false;
+    sea.updateMatrix();
+    scene.add(sea);
 
     this._surfScratch = { h: 0, trail: 0, moist: 0, mtn: 0, roadType: 0 };
 

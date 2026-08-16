@@ -1,5 +1,5 @@
 import { vnoise, fbm2, hash01, sstep } from './noise.js';
-import { Landforms, MEADOW, LAKE, WORLD_W, WORLD_H } from './Landforms.js';
+import { Landforms, MEADOW, LAKE, LAKES, SEA_LEVEL, WORLD_W, WORLD_H } from './Landforms.js';
 
 /**
  * TerrainField — Horizon Ride analytic terrain (Phase 3 world redesign,
@@ -23,7 +23,7 @@ const SEED = 733;
 
 // Lowland trail grid (2.5 m hidden shortcuts).
 const NS_SPACING = 800, NS_BASE = 400, NS_COUNT = 9;  // x = 400..6800
-const EW_SPACING = 700, EW_BASE = 350, EW_COUNT = 5;  // z = 350..3150
+const EW_SPACING = 700, EW_BASE = 350, EW_COUNT = 6;  // z = 350..3850
 const TRAIL_HALF = 1.25;
 const TRAIL_FADE = 4.4;
 
@@ -52,16 +52,15 @@ export class TerrainField {
   _base(x, z) {
     const lf = this.landforms;
     const corr = lf.corridor(x, z);
-    // Regional shaping (Phase 3.1): the base plain tilts by compass
-    // direction from the spawn — south = low grasslands & lakes, west =
-    // wide low valleys, north/east rise gently toward the ranges.
-    // 0 at spawn latitude/longitude, +-1 at the world edges.
-    const nz = (z - 2000) / 2000;  // -1 north edge .. +1 south edge
+    // Chapter 4 regional shaping (8000 x 5000, center 4000,2500):
+    //   N = Glacier Wall rise, NE = Kanjiro, E = Volcanic Highlands,
+    //   W = Red Canyon plateau, S = coastal shelf down to the ocean.
+    const nz = (z - 2500) / 2500;  // -1 north edge .. +1 south edge
     const nx = (x - 4000) / 4000;  // -1 west edge .. +1 east edge
     const regional =
-      -26 * Math.max(0, nz) +               // south: grassland shelf drops
-      -22 * Math.max(0, -nx) +              // west: wide valleys sit low
-      26 * Math.max(0, -nz) +               // north: gentle rise to the wall
+      -26 * Math.max(0, nz) +               // south: shelf eases seaward
+      14 * Math.max(0, -nx) +               // west: high canyon plateau
+      26 * Math.max(0, -nz) +               // north: rise to the wall
       18 * Math.max(0, nx);                 // east: rise toward the passes
     // Valley/plain band: 100-300 m, long wavelength, halved amplitude in
     // the southern grasslands (rolling, never hilly). Inside a road
@@ -71,6 +70,12 @@ export class TerrainField {
     const band = fbm2(x * 0.00055, z * 0.00055, SEED);
     const plain = 115 + band * 210 * (1 - 0.55 * south);
     let h = regional + 175 + (plain - 190) * (1 - 0.6 * corr);
+    // COASTAL CLIFFS + ocean: past z~4380 the shelf steps down an eased
+    // cliff band onto a beach that slides under SEA_LEVEL (42). The
+    // ocean IS the south border — water, not an invisible wall.
+    const coast = sstep(4380, 4700, z);
+    h += (26 - h) * coast * (1 - 0.55 * corr);
+    h -= sstep(4780, 5000, z) * 46;
 
     // Rolling hills — suppressed in road corridors and the meadow;
     // strongest in the SOUTH-WEST (the rolling-countryside region),
@@ -83,6 +88,8 @@ export class TerrainField {
 
     // Mountain ranges (scenery, corridor- and spawn-basin-suppressed).
     h += lf.mountains(x, z);
+    // Red Canyon trench (west region).
+    h = lf.canyonCarve(x, z, h);
 
     // Rider's Meadow: flatten to the meadow plane, tiny undulation kept.
     const mm = lf.meadowMask(x, z);
@@ -236,4 +243,4 @@ export class TerrainField {
   }
 }
 
-export { MEADOW, LAKE };
+export { MEADOW, LAKE, LAKES, SEA_LEVEL };

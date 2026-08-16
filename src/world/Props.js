@@ -112,7 +112,12 @@ export class Props {
         d.props.forEach((t, n) => {
           const a = hash01(d.x | 0, (d.z | 0) + n * 37, 13) * Math.PI * 2;
           const r2 = n === 0 ? 0 : 7 + n * 5;
-          const px = d.x + Math.cos(a) * r2, pz = d.z + Math.sin(a) * r2;
+          let px = d.x + Math.cos(a) * r2, pz = d.z + Math.sin(a) * r2;
+          // Keep secondary props off the road bed (primary marks the spot).
+          if (n > 0 && lf.roadDist(px, pz) < 7) {
+            px = d.x - Math.cos(a) * r2; pz = d.z - Math.sin(a) * r2;
+            if (lf.roadDist(px, pz) < 7) return;
+          }
           list.push({ t, x: px, z: pz, y: field.height(px, pz), yaw: a + 1.1, s: t === 'arch' ? 1.4 : 1 });
         });
       }
@@ -173,19 +178,23 @@ export class Props {
       const r = rng();
       if (info.trail > 0.4 && sl < 0.2) {
         // Beside a road/trail: signpost, resting spot, scenic bench or a
-        // short wooden bridge deck over the trail dip.
+        // short wooden bridge deck over the trail dip. Chapter 4 fix:
+        // solid roadside items only place where the offset spot is
+        // clear of EVERY laid road bed (colliders never block a road).
         const t = r < 0.4 ? 'sign' : r < 0.65 ? 'rest' : r < 0.85 ? 'bench' : 'bridge';
         if (t === 'bridge') {
           list.push({ t, x: px, z: pz, y: field.height(px, pz) - 0.1, yaw, s: 1 });
         } else {
           const qx = px + 9, qz = pz + 4;
-          list.push({ t, x: qx, z: qz, y: field.height(qx, qz), yaw, s: 0.95 + rng() * 0.2 });
+          if (lf.roadDist(qx, qz) > 7.5) {
+            list.push({ t, x: qx, z: qz, y: field.height(qx, qz), yaw, s: 0.95 + rng() * 0.2 });
+          }
         }
-      } else if (info.mtn > 0.65 && sl > 0.28 && r < 0.5) {
+      } else if (info.mtn > 0.65 && sl > 0.28 && r < 0.5 && lf.roadDist(px, pz) > 12) {
         list.push({ t: 'cave', x: px, z: pz, y: field.height(px, pz), yaw, s: 1 + rng() * 0.4 });
-      } else if (info.mtn > 0.2 && info.mtn < 0.75 && sl < 0.14 && r < 0.5) {
+      } else if (info.mtn > 0.2 && info.mtn < 0.75 && sl < 0.14 && r < 0.5 && lf.roadDist(px, pz) > 14) {
         list.push({ t: 'cabin', x: px, z: pz, y: field.height(px, pz), yaw, s: 0.95 + rng() * 0.15 });
-      } else if (sl < 0.3) {
+      } else if (sl < 0.3 && lf.roadDist(px, pz) > 12) {
         const rockKind = r < 0.3 ? 'rocks' : r < 0.45 ? 'boulder' : r < 0.6 ? 'slab'
           : r < 0.68 ? 'spire' : r < 0.82 ? 'scree' : 'flags';
         list.push({ t: rockKind, x: px, z: pz, y: field.height(px, pz), yaw, s: 0.8 + rng() * 0.6 });
@@ -202,10 +211,14 @@ export class Props {
   _groundY(p) {
     const f = this.field;
     const r = (FOOT[p.t] || 1) * (p.s || 1);
-    let y = f.height(p.x, p.z);
-    y = Math.min(y,
+    const c = f.height(p.x, p.z);
+    let y = Math.min(c,
       f.height(p.x + r, p.z), f.height(p.x - r, p.z),
       f.height(p.x, p.z + r), f.height(p.x, p.z - r));
+    // Cliff-side cap: never sink more than 1/3 of the footprint below
+    // the center sample — on genuinely steep flanks the prop half-buries
+    // uphill instead of dropping into the void downhill.
+    if (y < c - r * 0.35) y = c - r * 0.35;
     return y - 0.08;
   }
 

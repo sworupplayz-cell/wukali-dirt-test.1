@@ -36,16 +36,15 @@ import { vnoise, sstep } from './noise.js';
  */
 
 export const WORLD_W = 8000;
-export const WORLD_H = 4000;
-export const MEADOW = { x: 4000, z: 2000, r: 600, e: 165 };
-export const LAKE = { x: 4230, z: 2210, r: 90, depth: 6 };
-// Phase 3.1: the south is grasslands & LAKES — two more water bodies on
-// the way down the South Arm (meadow lake first for back-compat).
+export const WORLD_H = 5000; // Chapter 4: 40 km^2
+export const MEADOW = { x: 4000, z: 2500, r: 600, e: 165 }; // world center
+export const LAKE = { x: 4230, z: 2710, r: 90, depth: 6 };
 export const LAKES = [
   LAKE,
-  { x: 3620, z: 3120, r: 140, depth: 7 },
-  { x: 4780, z: 3380, r: 110, depth: 6 },
+  { x: 3620, z: 3620, r: 140, depth: 7 },
+  { x: 4780, z: 3880, r: 110, depth: 6 },
 ];
+export const SEA_LEVEL = 42; // Chapter 4: the southern ocean
 
 const S = 733;
 
@@ -62,30 +61,40 @@ const S = 733;
 // spawn basin mask additionally suppresses any massif within ~1.8 km.
 const RANGES = [
   {
-    id: 'N', name: 'Northwall',
+    id: 'N', name: 'Glacier Wall',
     nodes: [
-      [1500, 280, 1000, 500, 'Vetra Peak'],
-      [2600, 220, 1300, 620, 'Mistral Horn'],
-      [3800, 250, 1150, 560, 'Sorren Dome'],
-      [4900, 300, 1400, 640, 'Thornspire'],
+      [900, 700, 1450, 740, 'Vetra Peak'],
+      [2100, 660, 1700, 850, 'Mistral Horn'],
+      [3300, 690, 1550, 780, 'Sorren Dome'],
+      [4400, 740, 1800, 880, 'Thornspire'],
+      [5300, 700, 1500, 760, 'Weisshorn'],
     ],
-    dips: [0.32, 0.30, 0.33],
+    dips: [0.56, 0.42, 0.46, 0.42],
   },
   {
     id: 'K', name: 'Kanjiro Massif',
     nodes: [
-      [6200, 420, 1700, 800, 'Vel Morra'],
-      [7050, 560, 1890, 1000, 'Kanjiro Peak'],
-      [7720, 950, 1500, 680, 'Eastwatch'],
+      [6200, 920, 1700, 800, 'Vel Morra'],
+      [7050, 1060, 1890, 1000, 'Kanjiro Peak'],
+      [7720, 1450, 1500, 680, 'Eastwatch'],
     ],
     dips: [0.28, 0.30],
   },
   {
-    id: 'E', name: 'Eastguard',
+    id: 'V', name: 'Volcanic Highlands',
     nodes: [
-      [7700, 1500, 1050, 500, 'Fenn Ridge'],
-      [7800, 2100, 1300, 580, 'Harrow Peak'],
-      [7700, 2700, 1000, 480, 'Ghantir Knab'],
+      [7780, 2100, 1250, 620, 'Cinder Ridge'],
+      [7860, 2850, 1500, 700, 'Mount Ember'],
+      [7780, 3600, 1200, 600, 'Ash Spire'],
+    ],
+    dips: [0.33, 0.33],
+  },
+  {
+    id: 'R', name: 'Redwall',
+    nodes: [
+      [320, 1700, 900, 520, 'Redwall North'],
+      [270, 2500, 1100, 600, 'Redwall Point'],
+      [320, 3300, 950, 540, 'Redwall South'],
     ],
     dips: [0.33, 0.33],
   },
@@ -102,19 +111,32 @@ const CREST_F = 0.45, SKIRT_F = 0.55, SKIRT_W = 2.6;
 // points sit on them), so the crossings become natural junctions.
 const MAIN_ROUTES = [
   { name: 'Horizon Loop', pts: [
-    [1000, 1200], [2200, 1050], [4000, 980], [5800, 1050], [7000, 1200],
-    [7150, 2000], [7000, 2800], [5800, 2950], [4000, 3020], [2200, 2950],
-    [1000, 2800], [850, 2000], [1000, 1200]] },
-  { name: 'North Arm', calm: true, pts: [[4000, 980], [4000, 1500], [4000, 2000]] },
-  { name: 'South Arm', calm: true, pts: [[4000, 2000], [4000, 2500], [4000, 3020]] },
-  { name: 'West Arm', calm: true, pts: [[850, 2000], [2400, 2000], [4000, 2000]] },
-  { name: 'East Arm', calm: true, pts: [[4000, 2000], [5600, 2000], [7150, 2000]] },
-  // Beginner scenic ring around Rider's Meadow (r 820, 12-gon: gentle
-  // ~30 deg bends, curve radius >> 18 m). Junctions at N/E/S/W vertices.
+    [1000, 1700], [2200, 1550], [4000, 1480], [5800, 1550], [7000, 1700],
+    [7150, 2500], [7000, 3300], [5800, 3450], [4000, 3520], [2200, 3450],
+    [1000, 3300], [850, 2500], [1000, 1700]] },
+  { name: 'North Arm', calm: true, pts: [[4000, 1480], [4000, 2000], [4000, 2500]] },
+  { name: 'South Arm', calm: true, pts: [[4000, 2500], [4000, 3000], [4000, 3520]] },
+  { name: 'West Arm', calm: true, pts: [[850, 2500], [2400, 2500], [4000, 2500]] },
+  { name: 'East Arm', calm: true, pts: [[4000, 2500], [5600, 2500], [7150, 2500]] },
   { name: 'Meadow Loop', calm: true, pts: [
-    [4000, 1180], [4410, 1290], [4710, 1590], [4820, 2000], [4710, 2410],
-    [4410, 2710], [4000, 2820], [3590, 2710], [3290, 2410], [3180, 2000],
-    [3290, 1590], [3590, 1290], [4000, 1180]] },
+    [4000, 1680], [4410, 1790], [4710, 2090], [4820, 2500], [4710, 2910],
+    [4410, 3210], [4000, 3320], [3590, 3210], [3290, 2910], [3180, 2500],
+    [3290, 2090], [3590, 1790], [4000, 1680]] },
+  // Chapter 4 scenic roads: Coastal Cliffs, Red Canyon, Volcanic Highlands.
+  { name: 'Coastal Road', pts: [
+    [1000, 3300], [1250, 3950], [2300, 4300], [4000, 4360],
+    [5700, 4300], [6750, 3950], [7000, 3300]] },
+  { name: 'Red Canyon Road', grade: 0.14, pts: [
+    [850, 2500], [700, 2560], [630, 2720], [600, 2950],
+    [620, 3250], [780, 3560], [1250, 3950]] },
+  { name: 'Caldera Road', grade: 0.14, pts: [
+    [7000, 1700], [7360, 2150], [7520, 2870], [7000, 3300]] },
+  // Chapter 4: the marquee climb — a handcrafted serpentine from the
+  // Glacier Route bench (232 m) up the Vetra/Mistral notch to the Eagle
+  // Pass saddle (~1150 m): 8 authored switchback legs, grade-clamped.
+  { name: 'Eagle Approach', w: 2.5, grade: 0.145, wander: 0.25, corrStr: 0.82, corrW: 320, pts: [
+    [2500, 1395], [2260, 1300], [2560, 1215], [2280, 1130], [2600, 1050],
+    [2340, 975], [2640, 905], [2440, 830], [2700, 760], [2700, 675]] },
 ];
 
 // Named singletrack routes laid AFTER the passes (they pin to them).
@@ -126,19 +148,41 @@ const MAIN_ROUTES = [
 //   Ridge Shortcut — hidden connector over the hill crest between the
 //                    Meadow Loop NW and the Horizon Loop NW.
 const NAMED_TRAILS = [
-  { name: 'Glacier Route', w: 2.5, grade: 0.115, type: 2, wander: 0.5, pts: [
-    [3200, 240], [3500, 330], [3800, 380], [4100, 340], [4350, 280]] },
+  // Scenic singletrack (counts toward the 6 scenic roads).
+  { name: 'Glacier Route', w: 2.5, grade: 0.115, type: 1, wander: 0.5, pts: [
+    [2420, 1400], [2800, 1355], [3200, 1330], [3600, 1300], [3950, 1280], [4250, 1300]] },
+  // 12 hidden trails — every one ends at a landmark.
   { name: 'Canyon Trail', w: 1.25, grade: 0.175, type: 4, wander: 0.8, pts: [
-    [6650, 2005], [6780, 2110], [6950, 2150], [7080, 2090], [7130, 2010]] },
+    [6650, 2505], [6780, 2610], [6950, 2650], [7080, 2590], [7130, 2510]] },
   { name: 'Ridge Shortcut', w: 1.25, grade: 0.175, type: 4, wander: 1, pts: [
-    [3590, 1290], [3350, 1210], [3100, 1150], [2850, 1080], [2600, 1030]] },
+    [3590, 1790], [3350, 1710], [3100, 1650], [2850, 1580], [2600, 1530]] },
+  { name: 'Lakeshore Trail', w: 1.25, grade: 0.14, type: 4, wander: 0.8, pts: [
+    [4230, 2830], [3950, 3150], [3700, 3480]] },
+  { name: 'Twin Lakes Link', w: 1.25, grade: 0.14, type: 4, wander: 0.8, pts: [
+    [3700, 3700], [4220, 3820], [4700, 3830]] },
+  { name: 'Beach Drop', w: 1.25, grade: 0.16, type: 4, wander: 0.4, pts: [
+    [4000, 4390], [4200, 4470], [4010, 4560], [4210, 4650], [4110, 4700]] },
+  { name: 'Cliff Edge Path', w: 1.25, grade: 0.16, type: 4, wander: 0.4, pts: [
+    [2300, 4330], [2520, 4420], [2350, 4530], [2560, 4630], [2640, 4680]] },
+  { name: 'Glacier Foot Path', w: 1.25, grade: 0.115, type: 4, wander: 0.5, pts: [
+    [4000, 1560], [3970, 1420], [3940, 1285]] },
+  { name: 'Moraine Path', w: 1.25, grade: 0.16, type: 4, wander: 0.7, pts: [
+    [2600, 1530], [2520, 1470], [2440, 1408]] },
+  { name: 'Ember Scramble', w: 1.25, grade: 0.16, type: 4, wander: 0.6, pts: [
+    [7330, 2210], [7480, 2060], [7590, 1920]] },
+  { name: 'Rim Vista Trail', w: 1.25, grade: 0.13, type: 4, wander: 0.6, pts: [
+    [850, 2470], [950, 2280], [1030, 2120]] },
+  { name: "Miner's Path", w: 1.25, grade: 0.14, type: 4, wander: 0.5, pts: [
+    [600, 2830], [620, 2500], [660, 2230]] },
+  { name: 'Coast Caves Trail', w: 1.25, grade: 0.16, type: 4, wander: 0.4, pts: [
+    [5700, 4310], [5920, 4400], [5980, 4520], [6180, 4620]] },
 ];
 
 // ---- 5. Pass roads: [rangeIdx, gapIdx] saddles carrying switchbacks --------
 // East = the pass region (both Eastguard saddles), plus Northwall and the
 // Kanjiro Massif approaches. The Mistral Horn / Sorren Dome crossing is
 // the marquee climb: EAGLE PASS ROAD.
-const PASS_SADDLES = [[0, 1], [0, 2], [1, 0], [1, 1], [2, 0], [2, 1]];
+const PASS_SADDLES = [[0, 1], [0, 2], [0, 3], [1, 0], [1, 1], [2, 0], [2, 1], [3, 0]];
 const PASS_NAMES = { '01': 'Eagle Pass Road' };
 
 // Road hierarchy geometry. Half-widths of the flat bed:
@@ -147,13 +191,13 @@ const W_MAIN = 3.5;
 const W_PASS = 2.5;
 const MAIN_GRADE = 0.11;   // 6.3 deg — well under the 10 deg road cap
 const PASS_GRADE = 0.138;  // 7.9 deg construction => surface stays <= 10 deg
-const ROAD_FADE_MAX = 110;
-const PASS_WAVE = 340;
+const ROAD_FADE_MAX = 185; // deep Chapter 4 bench cuts stay <= 18 deg aprons
+const PASS_WAVE = 560; // longer traverses on the wide Chapter 4 pedestals
 const RD_STEP = 16;
 const RD_CELL = 128;
 
 // Practice jump on the South Arm, 140 m from the spawn intersection.
-const PJUMP = { x: 4000, z: 2140, h: 1.5, l: 8, w: 6 };
+const PJUMP = { x: 4000, z: 2640, h: 1.5, l: 8, w: 6 };
 
 const q4 = (t) => (t >= 1 ? 0 : (1 - t * t) * (1 - t * t));
 
@@ -173,12 +217,12 @@ export class Landforms {
 
     // Rider's Meadow fixtures (rendered by Props with the spawn sector).
     this.meadowFixtures = [
-      { t: 'sign', x: 4016, z: 2016, yaw: -0.7, s: 1.1 },
-      { t: 'cabin', x: 3865, z: 2120, yaw: 2.35, s: 1 },
-      { t: 'flags', x: 4055, z: 1945, yaw: 0.9, s: 1 },
-      { t: 'bench', x: 4152, z: 2148, yaw: -2.4, s: 1 },   // facing the lake
-      { t: 'bench', x: 3968, z: 2255, yaw: 0.4, s: 1 },
-      { t: 'flags', x: 4290, z: 2148, yaw: 2.1, s: 0.9 },  // lake far shore
+      { t: 'sign', x: 4016, z: 2516, yaw: -0.7, s: 1.1 },
+      { t: 'cabin', x: 3865, z: 2620, yaw: 2.35, s: 1 },
+      { t: 'flags', x: 4055, z: 2445, yaw: 0.9, s: 1 },
+      { t: 'bench', x: 4152, z: 2648, yaw: -2.4, s: 1 },   // facing the lake
+      { t: 'bench', x: 3968, z: 2755, yaw: 0.4, s: 1 },
+      { t: 'flags', x: 4290, z: 2648, yaw: 2.1, s: 0.9 },  // lake far shore
     ];
   }
 
@@ -192,6 +236,12 @@ export class Landforms {
       mainKm: +((this._mainM || 0) / 1000).toFixed(1),
       passKm: +((this._passM || 0) / 1000).toFixed(1),
       viewpoints: this.viewpoints.length,
+      scenicRoads: 6, // Horizon/Meadow Loops, Coastal, Red Canyon, Caldera, Glacier Route
+      hiddenTrails: this.namedTrails ? this.namedTrails.filter((t) => {
+        const m = [...this.roadMeta.values()].find((mm) => mm.name === t.name);
+        return m && m.type === 4;
+      }).length : 0,
+      landmarks: this.destinations ? this.destinations.length : 0,
       worldW: WORLD_W, worldH: WORLD_H,
     };
   }
@@ -206,11 +256,16 @@ export class Landforms {
   corridor(x, z) {
     let m = 0;
     for (const route of MAIN_ROUTES) {
+      // Chapter 4: per-route corridor strength/width. The Eagle Approach
+      // carves only a narrow partial notch (str 0.55, w 140) — it climbs
+      // THROUGH the massif rather than flattening it.
+      const str = route.corrStr ?? 1;
+      const cw = route.corrW ?? 450;
       const pts = route.pts;
       for (let i = 0; i < pts.length - 1; i++) {
         const r = segNearest(x, z, pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]);
-        if (r.d2 < 450 * 450) {
-          const v = 1 - sstep(120, 450, Math.sqrt(r.d2));
+        if (r.d2 < cw * cw) {
+          const v = (1 - sstep(cw * 0.27, cw, Math.sqrt(r.d2))) * str;
           if (v > m) m = v;
           if (m >= 1) return 1;
         }
@@ -275,6 +330,26 @@ export class Landforms {
     return best * sup;
   }
 
+  /**
+   * Red Canyon trench (Chapter 4, west region): a deep carve between the
+   * Redwall range and the Horizon Loop's west side. Floor ~95 m, walls
+   * eased by smin; the north/south ends ramp closed so roads/trails can
+   * enter along the floor.
+   */
+  canyonCarve(x, z, h) {
+    if (x < 250 || x > 1150 || z < 1500 || z > 3700) return h;
+    const zm = sstep(1500, 1750, z) * sstep(3700, 3450, z);
+    if (zm <= 0) return h;
+    const d = Math.abs(x - 620);
+    const prof = 95 + 0.5 * Math.max(0, d - 170) + (1 - zm) * 500;
+    if (prof < h + 16) {
+      const k = 16;
+      const hh = Math.max(0, k - Math.abs(h - prof));
+      h = Math.min(h, prof) - (hh * hh) / (4 * k);
+    }
+    return h;
+  }
+
   /** Practice jump kicker on the South Arm (applied AFTER road blending). */
   practiceJump(x, z) {
     const du = Math.abs(z - PJUMP.z) / PJUMP.l;
@@ -314,7 +389,8 @@ export class Landforms {
       const id = roadId++;
       const i0 = this._rx.length;
       const lenM = this._laySpline(raw, route.pts, id, {
-        w: W_MAIN, grade: MAIN_GRADE, type: 1, calm: route.calm, wander: 1,
+        w: route.w ?? W_MAIN, grade: route.grade ?? MAIN_GRADE, type: 1,
+        calm: route.calm, wander: route.wander ?? 1,
       });
       this.roadMeta.set(id, { name: route.name, i0, n: this._rx.length - i0, type: 1 });
       this.mainRoads.push({ name: route.name, roadId: id, lengthM: lenM });
@@ -375,24 +451,42 @@ export class Landforms {
    * them; F3 names the nearest one.
    */
   _initDestinations(raw) {
-    const eagle = this.passes[0]; // Eagle Pass saddle
-    const glacierEnd = this.passes[1]; // N2-N3 saddle (Glacier Route east end)
+    const eagle = this.passes[0];      // Eagle Pass saddle (N gap 1)
+    const glacierEnd = this.passes[1]; // Sorren/Thornspire saddle
     this.destinations = [
       { id: 'D1', name: 'Eagle Eyrie Lookout', x: eagle.sx + 14, z: eagle.sz + 10,
         kind: 'lookout', props: ['lookout', 'flags', 'bench'] },
       { id: 'D2', name: "Hermit's Cabin", x: glacierEnd.sx + 16, z: glacierEnd.sz + 12,
         kind: 'cabin', props: ['cabin', 'sign'] },
-      { id: 'D3', name: 'Stone Arch', x: 6950, z: 2165,
+      { id: 'D3', name: 'Stone Arch', x: 6950, z: 2648,
         kind: 'arch', props: ['arch', 'rocks'] },
-      { id: 'D4', name: 'Prayer Flag Hill', x: 3100, z: 1128,
+      { id: 'D4', name: 'Prayer Flag Hill', x: 2560, z: 1445,
         kind: 'flags', props: ['flags', 'flags', 'bench'] },
-      { id: 'D5', name: 'Twin Lakes Rest', x: 3620, z: 2985,
+      { id: 'D5', name: 'Twin Lakes Rest', x: 3700, z: 3590,
         kind: 'rest', props: ['rest', 'bench', 'sign'] },
       { id: 'D6', name: "Rider's Meadow", x: MEADOW.x, z: MEADOW.z,
-        kind: 'meadow', props: [] }, // fixtures already handcrafted
+        kind: 'meadow', props: [] },
+      // Chapter 4 landmarks (each at a named-trail / scenic-road end).
+      { id: 'D7', name: 'Glacier Overlook', x: 3952, z: 1268,
+        kind: 'lookout', props: ['lookout', 'flags'] },
+      { id: 'D8', name: 'Moraine Cave', x: 2408, z: 1392,
+        kind: 'cave', props: ['cave', 'rocks'] },
+      { id: 'D9', name: 'Redwall Vista', x: 1042, z: 2104,
+        kind: 'lookout', props: ['lookout', 'bench'] },
+      { id: 'D10', name: 'Canyon Floor Cave', x: 672, z: 2214,
+        kind: 'cave', props: ['cave', 'scree'] },
+      { id: 'D11', name: 'Black Sand Rest', x: 4110, z: 4700,
+        kind: 'rest', props: ['rest', 'bench'] },
+      { id: 'D12', name: 'Cliff Arch', x: 2652, z: 4696,
+        kind: 'arch', props: ['arch', 'rocks'] },
+      { id: 'D13', name: 'Ember Lookout', x: 7532, z: 2886,
+        kind: 'lookout', props: ['lookout', 'flags', 'bench'] },
+      { id: 'D14', name: 'Cinder Cave', x: 7560, z: 1950,
+        kind: 'cave', props: ['cave', 'scree'] },
+      { id: 'D15', name: 'Coast Caves', x: 6192, z: 4636,
+        kind: 'cave', props: ['cave', 'rocks', 'bench'] },
     ];
   }
-
   /** Nearest destination landmark to (x,z) — F3 + tests. */
   nearestDestination(x, z) {
     let best = null, bd = Infinity;
@@ -519,11 +613,11 @@ export class Landforms {
    */
   _walkSwitchbacks(raw, sx, sz, saddleE, ox, oz, vx, vz, roadId) {
     let x = sx, z = sz, e = saddleE;
-    let lat = 1, sinceTurn = 0, len = 0;
+    let lat = 1, sinceTurn = 0, len = 0, embank = 0;
     let hx = ox, hz = oz;
     this._pushVertex(x, z, e, roadId, W_PASS, 2);
-    for (let i = 0; i < 400; i++) {
-      let bx = vx * lat + ox * 0.45, bz = vz * lat + oz * 0.45;
+    for (let i = 0; i < 700; i++) {
+      let bx = vx * lat + ox * 0.62, bz = vz * lat + oz * 0.62;
       const bl = Math.hypot(bx, bz);
       bx /= bl; bz /= bl;
       const eWant = e - PASS_GRADE * RD_STEP * 0.8;
@@ -566,7 +660,11 @@ export class Landforms {
       sinceTurn += RD_STEP;
       if (sinceTurn > PASS_WAVE / 2) { lat = -lat; sinceTurn = 0; }
       if (this.mountains(x, z) < 45 && Math.abs(e - eT) < 3) break;
-      if (e - eT > 26) break;
+      // Embankment with hysteresis: brief gully crossings bench over
+      // (the blend widens automatically); only a SUSTAINED drop-away
+      // (6 consecutive steps > 34 m) ends the flank.
+      if (e - eT > 50) { if (++embank >= 8) break; }
+      else embank = 0;
       if (x < 60 || x > WORLD_W - 60 || z < 60 || z > WORLD_H - 60) break;
     }
     // Landing taper.
@@ -612,7 +710,11 @@ export class Landforms {
             const arc = (cur - i) * RD_STEP;
             // Own path: within the elbow-clamp window (30 verts) the
             // clamp guarantees the beds stay joined — never a conflict;
-            // beyond it only a true LOOP-BACK counts.
+            // beyond it only a true LOOP-BACK counts (returned close to
+            // a much older bench at a >30% wall). On the wide Chapter 4
+            // pedestals legs run closer for longer, so the euclid/arc
+            // ratio threshold drops to 0.22 and the wall test still
+            // applies below.
             if (arc <= 30 * RD_STEP || d > 0.35 * arc) continue;
           }
           const dE = Math.abs(e - this._re[i]);

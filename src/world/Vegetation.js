@@ -144,13 +144,14 @@ export class Vegetation {
 
     for (let i = 0; i < nTrees + nGround; i++) {
       const x = ox + 6 + rng() * (CELL - 12), z = oz + 6 + rng() * (CELL - 12);
-      if (x < 30 || x > 7970 || z < 30 || z > 3970) continue;
+      if (x < 30 || x > 7970 || z < 30 || z > 4970) continue;
       f.sample(x, z, info);
       const h = info.h;
+      if (h < 55) continue; // no vegetation on the beach / under the sea
       // Keep clear of roads/trails and the groomed meadow core, and the lake.
       if (info.trail > 0.02) continue;
       if (lf.roadDist(x, z) < 11) continue;
-      const dMeadow = Math.hypot(x - 4000, z - 2000);
+      const dMeadow = Math.hypot(x - 4000, z - 2500);
       if (dMeadow < 240) continue;
       // Slope: no trees on cliffs.
       const e = 5;

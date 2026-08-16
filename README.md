@@ -2,19 +2,24 @@
 
 A lightweight, Android-first, 3D off-road dirt-bike game.
 
-**Current status: Hotfix 3.5 — Original camera restored.** The camera is
-now the byte-for-byte ORIGINAL FollowCamera from the stable Wukali Ride
-Test build (commit 7d4913c): classic smooth third-person chase (constant
-6.2 m distance, 2.6 m height, 8/s frame-rate-independent exponential
-interpolation, 4.5/s heading tracking, simple terrain clearance clamp),
-the original first-person helmet camera (1.34 m eye height, view through
-the bars, follows the bike's full orientation), and the original eased
-POV toggle (5/s blend, smooth-stepped mix, no snapping). All experimental
-camera filtering from the recent stability chapters is removed — CI now
-asserts the live camera's vertical track matches the original algorithm
-with 0 m deviation on the rough reference ride. Everything else (engine
-beta loader, collision, LOD, streaming, graphics settings, world) is
-untouched.
+**Current status: Chapter 4 — World foundation.** The world has grown
+from 32 km2 to 40 km2 (8,000 x 5,000 m, 160 streamed sectors) with five
+distinct regions: Rider's Meadow in the center (spawn, lake, cabins),
+the Glacier Wall in the north (five 1,450-1,800 m peaks), the Volcanic
+Highlands in the east (basalt, ember glints, Mount Ember caldera), Red
+Canyon in the west (a carved sandstone trench with strata banding) and
+the Coastal Cliffs in the south (black-sand beaches falling to a real
+ocean at sea level 42 m). The road network is 26 named handcrafted
+spline roads — 8 mountain passes (incl. the Eagle Pass Road and its
+authored serpentine approach), 6 scenic roads (Horizon Loop, Coastal
+Road, Red Canyon Road, Caldera Road, Glacier Route, Meadow Loop) and 12
+hidden trails — every one connecting meaningful places, none ending
+randomly. 15 landmarks (lookouts, cabins, stone arches, prayer-flag
+hills, caves, rest areas) are all verified reachable on the bike by CI.
+The map has no invisible walls: the north is blocked by glacier faces,
+the south by the ocean, the east by volcanic cliffs and the west by
+canyon walls. Bike physics, the original FollowCamera and the streaming
+architecture (SectorWorld / ChunkGrid / ObjectPool) are untouched.
 
 ## Tech
 
