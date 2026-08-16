@@ -205,7 +205,7 @@ export class Vegetation {
       // the shoreline cut-off all move with the new terrain band. 47 m is
       // just above the inland floor; the beach strip (z > 4420) stays
       // bare sand.
-      const shore = z > 4420 && h < 66;
+      const shore = (z > 4420 && h < 66) || lf.inWater(x, z);
       if (h >= 47 && !shore && info.trail <= 0.02 && dMeadow >= 240 && lf.roadDist(x, z) >= 11) {
         // Slope: no trees on cliffs.
         const e = 5;

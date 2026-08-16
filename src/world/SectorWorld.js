@@ -73,10 +73,18 @@ export class SectorWorld {
     const waterMat = new THREE.MeshLambertMaterial({
       color: 0x3f7fae, transparent: true, opacity: 0.88, depthWrite: false,
     });
+    // Chapter 5A: the two crystal lakes get their own paler, clearer
+    // water (one extra material, still one draw call per lake).
+    const crystalMat = new THREE.MeshLambertMaterial({
+      color: 0x5fc6d8, transparent: true, opacity: 0.72, depthWrite: false,
+    });
     for (const l of LAKES) {
-      const water = new THREE.Mesh(new THREE.CircleGeometry(l.r * 0.92, 28), waterMat);
+      const water = new THREE.Mesh(new THREE.CircleGeometry(l.r * 0.92, 28),
+        l.crystal ? crystalMat : waterMat);
       water.rotation.x = -Math.PI / 2;
-      water.position.set(l.x, this.field.height(l.x, l.z) + l.depth * 0.45, l.z);
+      // Levelled lakes carry their own water plane height.
+      water.position.set(l.x, l.level != null ? l.level - 0.15
+        : this.field.height(l.x, l.z) + l.depth * 0.45, l.z);
       water.matrixAutoUpdate = false;
       water.updateMatrix();
       scene.add(water);

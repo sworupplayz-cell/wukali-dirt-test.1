@@ -2,7 +2,7 @@
 
 A lightweight, Android-first, 3D off-road dirt-bike game.
 
-**Current status: Chapter 6 — Terrain rebuild.** The world has grown
+**Current status: Chapter 5A — Terrain generation rework.** The world has grown
 from 32 km2 to 40 km2 (8,000 x 5,000 m, 160 streamed sectors) with five
 distinct regions: Rider's Meadow in the center (spawn, lake, cabins),
 the Glacier Wall in the north (five 820-1,290 m peaks), the Volcanic
@@ -76,11 +76,14 @@ Measured against the brief (audited over 64,521 samples on a 25 m grid):
 
 | target | before | after |
 | --- | --- | --- |
-| terrain in the 0-120 m band | 9.1% | **78.0%** (99.6% of non-massif land) |
-| mean elevation | 489 m | **186 m** |
+| terrain in the 0-120 m band | 9.1% | **77.8%** (98.6% of non-massif land) |
+| mean elevation | 489 m | **179 m** |
+| max elevation | 2,183 m | **2,231 m** (Kanjiro Peak) |
 | scenic ridge spacing | no crests found | **680 m median** |
-| rolling-country slope | 9.5% over 37 deg | **p50 4.7, p95 19.2, 0.57% over 37 deg** |
-| steepest open-country ground | 89.6 deg | **55 deg** (an escarpment, not a wall) |
+| rolling-country slope | 9.5% over 37 deg | **p50 4.8, p95 20.3, 0.47% over 37 deg** |
+| steepest open-country ground | 89.6 deg | **57 deg** (a coastal cliff, not a wall) |
+| named landforms | 0 | **4 ridge systems, 3 basins, 2 plateaus, 2 lakes** |
+| viewpoints | 14 computed | **14 (6 authored major + 8 computed)** |
 
 The last 22% sits in the border ranges themselves — on an 8 x 5 km map a
 mountain ring around three edges is about a fifth of the area, which is
@@ -91,7 +94,34 @@ purpose; nothing in the open country does.
 Border mountains stay at the map edges (a confinement mask forbids inland
 massifs), the 14 named peaks and the 2,239 m Kanjiro summit remain, and
 all 26 roads still meet their grade limits (mains 9.2 deg, passes 8.6
-deg). Road beds are relaxed onto the ground under a fill cap instead of
+deg).
+
+**Chapter 5A** puts named structure on that eroded grain — again terrain
+generation only. The noise layer gives the world its texture; this layer
+gives it landmarks you navigate by:
+
+- **4 ridge systems** (Sentinel, Larkspur, Ember, Vanguard) — polyline
+  spines whose crest undulates into named high points with saddles
+  between them, so they read as ranges, never as isolated domes.
+- **3 large basins** (Sundown, Kestrel, Willow) — wide flat-floored bowls
+  that open the country up between the ridges.
+- **2 plateaus** (Anvil, Copper Table) — flat tables on a ~28 degree rim:
+  gentle cliffs you ride along looking for the ramp.
+- **2 crystal lakes** (Mirror Lake in Sundown Basin, Azure Tarn under the
+  Glacier Wall) — LEVELLED lakes: the pan is blended flat and the shore
+  ring pinned above the waterline, so the water never stands proud of a
+  downhill bank. Both are clear of every road apron; they get their own
+  paler water material (one extra material, one draw call each).
+- **6 major viewpoints** on the new landforms, merged into the
+  road-computed viewpoint list so the prop system furnishes them exactly
+  like the rest.
+
+Every feature is a smooth analytic blob (quartic falloff / smoothstep
+rims) and corridor-aware, so none of them can add a wall or bend a road
+past its grade limit. Two placement bugs surfaced and were fixed on the
+way: roadside fences could stand across a curving bed (a 6 m solid run
+offset only by the half-width) and a viewpoint platform could land on the
+road — both now verify clearance before placing. Road beds are relaxed onto the ground under a fill cap instead of
 being propped on 500 m pedestals, and the Eagle Approach serpentine was
 re-laid onto the rebuilt flank with its summit pinned to the pass saddle,
 so the marquee climb is a genuine 1.5 km switchback ascent again.

@@ -24,7 +24,7 @@ const SEED = 733;
 // ---- Chapter 6 lowland shaping ---------------------------------------------
 // 80% of the map has to live in the 0-120 m band, so the lowland is built
 // around a mean of ~86 m with +-35 m of relief on top of it.
-const LOW_BASE = 67;      // mean lowland elevation (m)
+const LOW_BASE = 59;      // mean lowland elevation (m)
 const DRAIN = 18;         // drop from the interior to the southern shore
 const WEST_RISE = 12;     // west canyon plateau lift
 const EAST_RISE = 14;     // east rise toward the volcanic passes
@@ -33,7 +33,7 @@ const LOW_FLOOR = 44;     // soft inland floor (above SEA_LEVEL 42)
 // ridge transform puts a crest line at every half period, so F = 0.00095
 // lays a scenic crest every ~530 m — inside the 500-800 m target.
 const RIDGE_F = 0.0026;
-const RIDGE_H = 38;       // crest height above the trough line
+const RIDGE_H = 32;       // crest height above the trough line
 const FINE_F = 0.0062;    // fine crests (~190 m) for surface interest
 const FINE_H = 6;
 // Drainage: main valleys every ~900 m with tributaries inside them.
@@ -160,6 +160,14 @@ export class TerrainField {
     // ---- 5. Benches: short escarpments on the hill flanks -------------
     h += 7 * sstep(0.44, 0.66, r1) * sstep(0.55, 0.85, relief) * open;
 
+    // ---- 5b. Chapter 5A authored macro-landforms ----------------------
+    // Named structure on top of the eroded grain: four ridge systems,
+    // three large basins and the plateaus. All corridor-aware, all
+    // smooth blobs, so they add shape without adding a single wall.
+    h += lf.ridgeSystems(x, z, corr) * (1 - mm);
+    h += lf.plateauLift(x, z, corr) * (1 - mm);
+    h -= lf.basinDepth(x, z, corr) * (1 - mm);
+
     // ---- 6. Roads follow valleys --------------------------------------
     // Every main corridor carries a shallow vale of its own, so a road
     // laid down the corridor is a road running along a valley floor.
@@ -194,6 +202,8 @@ export class TerrainField {
     }
     // Lakes carve everywhere they exist (meadow + southern grasslands).
     h -= lf.lakeDepth(x, z);
+    // Chapter 5A crystal lakes sit in a levelled pan of their own.
+    h = lf.lakeShape(x, z, h);
     return h;
   }
 

@@ -43,10 +43,69 @@ export const LAKES = [
   LAKE,
   { x: 3620, z: 3620, r: 140, depth: 7 },
   { x: 4780, z: 3880, r: 110, depth: 6 },
+  // Chapter 5A CRYSTAL LAKES: still, clear water in sheltered ground —
+  // one on the floor of Sundown Basin, one in the quiet flats under the
+  // Glacier Wall. Both sit well clear of every road bed, so no road
+  // apron can cut their shoreline open.
+  { x: 2350, z: 2790, r: 172, depth: 12, level: 68, name: 'Mirror Lake', crystal: true },
+  { x: 4830, z: 1060, r: 112, depth: 11, level: 76, name: 'Azure Tarn', crystal: true },
 ];
 export const SEA_LEVEL = 42; // Chapter 4: the southern ocean
 
 const S = 733;
+
+// ---- Chapter 5A: authored macro-landforms ---------------------------------
+// The Chapter 6 field gives the world its erosion grain (ridge lines,
+// dendritic valleys, basins-by-noise). This layer puts NAMED landforms on
+// top of it so the map has structure you can navigate by, instead of an
+// evenly interesting texture. Everything here is a smooth analytic blob
+// (quartic falloff / smoothstep rims), so nothing it adds can make a
+// vertical wall, and every feature is corridor-aware so roads stay
+// rideable through them.
+
+// 4 RIDGE SYSTEMS — elongated chains, never isolated domes. Each spine is
+// a polyline; the crest undulates along its length and drops to saddles
+// between the named high points, which is what makes a ridge read as a
+// range rather than a wall.
+const RIDGE_SYSTEMS = [
+  { name: 'Sentinel Ridge', h: 50, w: 250, wave: 0.34,
+    pts: [[1500, 2060], [2050, 1980], [2600, 2090], [3060, 2210]] },
+  { name: 'Larkspur Ridge', h: 44, w: 235, wave: 0.40,
+    pts: [[1560, 3060], [2150, 3160], [2720, 3080], [3160, 2990]] },
+  { name: 'Ember Ridge', h: 48, w: 245, wave: 0.36,
+    pts: [[5040, 3030], [5600, 3130], [6160, 3050], [6640, 2900]] },
+  { name: 'Vanguard Ridge', h: 52, w: 255, wave: 0.32,
+    pts: [[5090, 1980], [5650, 1890], [6210, 1960], [6690, 2110]] },
+];
+
+// 3 LARGE BASINS — wide, shallow, flat-floored bowls. They are the
+// counterweight to the ridges: open ground you can see across, and the
+// reason the lowland reads as a landscape with rooms in it.
+const BASINS = [
+  { name: 'Sundown Basin', x: 2350, z: 2690, r: 640, depth: 26, flat: 0.55 },
+  { name: 'Kestrel Basin', x: 6150, z: 2700, r: 560, depth: 23, flat: 0.5 },
+  { name: 'Willow Basin', x: 3300, z: 3760, r: 580, depth: 20, flat: 0.5 },
+];
+
+// PLATEAUS — flat tables lifted above the country on a rim that steepens
+// to about 28 deg: a gentle cliff you ride along looking for the ramp,
+// never a wall you cannot pass.
+const PLATEAUS = [
+  { name: 'Anvil Plateau', x: 1760, z: 1660, r: 330, rim: 105, h: 40 },
+  { name: 'Copper Table', x: 6560, z: 3700, r: 290, rim: 95, h: 37 },
+];
+
+// 6 MAJOR VIEWPOINTS — authored, on the new landforms and within reach of
+// a road. They are merged into the road-computed viewpoint list, so the
+// prop system furnishes them exactly like the rest (lookout + flags).
+const MAJOR_VIEWPOINTS = [
+  { id: 'MV1', name: 'Sentinel Point', x: 3040, z: 2215 },
+  { id: 'MV2', name: 'Larkspur Lookout', x: 3140, z: 2995 },
+  { id: 'MV3', name: 'Ember Overlook', x: 5060, z: 3020 },
+  { id: 'MV4', name: 'Vanguard Vista', x: 5110, z: 1975 },
+  { id: 'MV5', name: 'Anvil Rim', x: 1880, z: 1665 },
+  { id: 'MV6', name: 'Mirror Lake Overlook', x: 2352, z: 2565 },
+];
 
 // ---- 4. Mountain ranges (scenery): spine nodes [x, z, H, W, name] ----------
 // Phase 3.1 redistribution — the spawn bowl is gone:
@@ -273,6 +332,11 @@ export class Landforms {
       mainKm: +((this._mainM || 0) / 1000).toFixed(1),
       passKm: +((this._passM || 0) / 1000).toFixed(1),
       viewpoints: this.viewpoints.length,
+      majorViewpoints: this.majorViewpoints ? this.majorViewpoints.length : 0,
+      ridgeSystems: RIDGE_SYSTEMS.length,
+      basins: BASINS.length,
+      plateaus: PLATEAUS.length,
+      crystalLakes: LAKES.filter((l) => l.crystal).length,
       scenicRoads: 6, // Horizon/Meadow Loops, Coastal, Red Canyon, Caldera, Glacier Route
       hiddenTrails: this.namedTrails ? this.namedTrails.filter((t) => {
         const m = [...this.roadMeta.values()].find((mm) => mm.name === t.name);
@@ -459,11 +523,114 @@ export class Landforms {
   }
 
   /** Combined lake bowl depth (meadow lake + the southern lakes). */
+  /**
+   * Chapter 5A ridge systems: authored crest chains added on top of the
+   * eroded lowland. `corr` suppresses them along main-road corridors so a
+   * road never has to climb a ridge head-on — it runs around the flank or
+   * through a saddle.
+   */
+  ridgeSystems(x, z, corr) {
+    let add = 0;
+    for (const r of RIDGE_SYSTEMS) {
+      const bb = r._bb || (r._bb = ridgeBBox(r));
+      if (x < bb[0] || x > bb[1] || z < bb[2] || z > bb[3]) continue;
+      let d2 = Infinity, u = 0, seg = 0;
+      for (let i = 0; i < r.pts.length - 1; i++) {
+        const a = r.pts[i], b = r.pts[i + 1];
+        segNearest(x, z, a[0], a[1], b[0], b[1]);
+        if (_SN.d2 < d2) { d2 = _SN.d2; u = _SN.t; seg = i; }
+      }
+      const d = Math.sqrt(d2);
+      if (d >= r.w) continue;
+      // Crest undulation along the spine: high points with saddles
+      // between them (the low points are the natural crossings).
+      const t = (seg + u) / (r.pts.length - 1);
+      const crest = 1 - r.wave * (0.5 - 0.5 * Math.cos(t * Math.PI * 2 * (r.pts.length - 1)));
+      const rough = 1 + 0.16 * (vnoise(x * 0.0035 + 12.7, z * 0.0035 - 4.3, S + 61) - 0.5);
+      const v = r.h * crest * rough * q4(d / r.w);
+      if (v > add) add = v;
+    }
+    return add * (1 - 0.72 * corr);
+  }
+
+  /** Chapter 5A basins: wide bowls with flat floors, eased at the rim. */
+  basinDepth(x, z, corr) {
+    let cut = 0;
+    for (const b of BASINS) {
+      const d = Math.hypot(x - b.x, z - b.z);
+      if (d >= b.r) continue;
+      // Flat floor out to `flat` of the radius, then a smooth rim.
+      const v = b.depth * (1 - sstep(b.r * b.flat, b.r, d));
+      if (v > cut) cut = v;
+    }
+    return cut * (1 - 0.45 * corr);
+  }
+
+  /** Chapter 5A plateaus: flat tables on a ~28 deg rim ("gentle cliffs"). */
+  plateauLift(x, z, corr) {
+    let add = 0;
+    for (const p of PLATEAUS) {
+      const d = Math.hypot(x - p.x, z - p.z);
+      if (d >= p.r + 40) continue;
+      const v = p.h * (1 - sstep(p.rim, p.r, d));
+      if (v > add) add = v;
+    }
+    return add * (1 - 0.6 * corr);
+  }
+
+  /** Named landform under a point (debug/report tooling). */
+  landformAt(x, z) {
+    for (const b of BASINS) if (Math.hypot(x - b.x, z - b.z) < b.r) return b.name;
+    for (const p of PLATEAUS) if (Math.hypot(x - p.x, z - p.z) < p.r) return p.name;
+    for (const r of RIDGE_SYSTEMS) {
+      for (let i = 0; i < r.pts.length - 1; i++) {
+        const a = r.pts[i], b = r.pts[i + 1];
+        segNearest(x, z, a[0], a[1], b[0], b[1]);
+        if (_SN.d2 < r.w * r.w) return r.name;
+      }
+    }
+    return null;
+  }
+
+  /** True inside a lake's water surface — nothing is planted or scattered
+   *  there (Chapter 5A: the crystal lakes had pines standing in them). */
+  inWater(x, z) {
+    for (const l of LAKES) {
+      const r = l.level ? l.r * 1.04 : l.r * 0.9;
+      const dx = x - l.x, dz = z - l.z;
+      if (dx * dx + dz * dz < r * r) return true;
+    }
+    return false;
+  }
+
   lakeDepth(x, z) {
     let h = 0;
     for (const l of LAKES) {
+      if (l.level) continue; // levelled lakes are shaped in lakeShape()
       const d = Math.hypot(x - l.x, z - l.z);
       if (d < l.r) h += l.depth * q4(d / l.r);
+    }
+    return h;
+  }
+
+  /**
+   * Chapter 5A crystal lakes: a LEVELLED lake. A bowl carved into sloping
+   * ground gives you a flat water disc standing proud of the downhill
+   * shore (water running uphill); a real lake sits in a level pan. Inside
+   * the basin the surface is blended to `level - depth * bowl`, the shore
+   * ring is pinned at the waterline and the apron rises ~9 m above it, so
+   * the lake is enclosed from every direction and the blend back into the
+   * natural ground is smooth.
+   */
+  lakeShape(x, z, h) {
+    for (const l of LAKES) {
+      if (!l.level) continue;
+      const d = Math.hypot(x - l.x, z - l.z);
+      const R = l.r * 3.4;
+      if (d >= R) continue;
+      const bowl = l.level - l.depth * q4(d / l.r) + 13 * sstep(l.r * 0.98, R * 0.55, d);
+      const w = 1 - sstep(R * 0.42, R, d);
+      h += (bowl - h) * w;
     }
     return h;
   }
@@ -1001,12 +1168,31 @@ export class Landforms {
       if (!cur || drop > cur.score) best.set(key, { score: drop, i });
     }
     const arr = [...best.values()].sort((a, b) => b.score - a.score).slice(0, 14);
-    this.viewpoints = arr.map((v, n) => ({
-      id: `VP${String(n + 1).padStart(2, '0')}`,
+    const computed = arr.map((v) => ({
       x: this._rx[v.i], z: this._rz[v.i], e: this._re[v.i],
       drop: +v.score.toFixed(0),
       type: this._rt[v.i] === 1 ? 'main' : 'pass',
     }));
+    // Chapter 5A: the six MAJOR viewpoints are authored on the new
+    // landforms (ridge crests, a plateau rim, a lake shoulder). They are
+    // furnished exactly like the computed ones, and any computed
+    // viewpoint that lands on top of one is dropped so a spot never gets
+    // two lookout platforms.
+    const major = MAJOR_VIEWPOINTS.map((m) => {
+      let drop = 0;
+      for (let a = 0; a < 8; a++) {
+        const th = (a / 8) * Math.PI * 2;
+        const dd = raw(m.x, m.z) - raw(m.x + Math.cos(th) * 110, m.z + Math.sin(th) * 110);
+        if (dd > drop) drop = dd;
+      }
+      return { name: m.name, x: m.x, z: m.z, e: raw(m.x, m.z), drop: +drop.toFixed(0), type: 'major' };
+    });
+    const keep = computed.filter((c) =>
+      !major.some((m) => Math.hypot(c.x - m.x, c.z - m.z) < 260));
+    this.viewpoints = major.concat(keep).map((v, n) => ({
+      id: `VP${String(n + 1).padStart(2, '0')}`, ...v,
+    }));
+    this.majorViewpoints = this.viewpoints.filter((v) => v.type === 'major');
   }
 
   nearestViewpoint(x, z) {
@@ -1077,6 +1263,15 @@ function segNearest(px, pz, ax, az, bx, bz) {
   const dx = px - (ax + abx * t), dz = pz - (az + abz * t);
   _SN.t = t; _SN.d2 = dx * dx + dz * dz;
   return _SN;
+}
+
+function ridgeBBox(r) {
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (const p of r.pts) {
+    x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]);
+    z0 = Math.min(z0, p[1]); z1 = Math.max(z1, p[1]);
+  }
+  return [x0 - r.w, x1 + r.w, z0 - r.w, z1 + r.w];
 }
 
 function rangeBBox(r) {

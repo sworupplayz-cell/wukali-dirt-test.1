@@ -155,11 +155,23 @@ export class Props {
         if (l2 < 1) continue;
         const nx2 = -dz2 / l2, nz2 = dx2 / l2;
         const side = h < 0.17 ? 1 : -1;
-        const off = lf._rw[i] + 2.2;
-        const px = rx + nx2 * off * side, pz = rz + nz2 * off * side;
         const t = lf._rt[i] === 4 ? 'marker' : (h * 3) % 1 < 0.6 ? 'fence' : 'marker';
-        list.push({ t, x: px, z: pz, y: field.height(px, pz),
-          yaw: Math.atan2(dx2, dz2), s: 1 });
+        // Chapter 5A: a fence is a 6 m SOLID run. Offsetting it by the
+        // half-width alone is not enough on a curve — the straight run
+        // cuts the chord and ends up standing across the bed, which can
+        // wall off the only line through a pass. Push it clear of the
+        // shoulder and verify BOTH ends are off the road before placing.
+        const off = lf._rw[i] + (t === 'fence' ? 4.6 : 2.2);
+        const px = rx + nx2 * off * side, pz = rz + nz2 * off * side;
+        const yaw = Math.atan2(dx2, dz2);
+        if (t === 'fence') {
+          const ex = Math.sin(yaw) * 2.8, ez = Math.cos(yaw) * 2.8;
+          const clear = (qx, qz) => lf.roadDist(qx, qz) > lf._rw[i] + 2.6;
+          if (!clear(px, pz) || !clear(px + ex, pz + ez) || !clear(px - ex, pz - ez)) continue;
+        } else if (lf.roadDist(px, pz) < lf._rw[i] + 1.4) {
+          continue;
+        }
+        list.push({ t, x: px, z: pz, y: field.height(px, pz), yaw, s: 1 });
       }
     }
 
@@ -167,10 +179,21 @@ export class Props {
     for (const v of lf.viewpoints) {
       if (v.x < ox || v.x >= ox + 500 || v.z < oz || v.z >= oz + 500) continue;
       const a = hash01(v.x | 0, v.z | 0, 7) * Math.PI * 2;
-      // Offset off the road bed (12 m to the overlook side).
-      const px = v.x + Math.cos(a) * 12, pz = v.z + Math.sin(a) * 12;
+      // Offset off the road bed (12 m to the overlook side). Chapter 5A:
+      // a lookout is a SOLID prop, so if the hashed side happens to land
+      // on a road it is flipped to the far side, and dropped entirely if
+      // both sides are on the bed — a platform standing in the road can
+      // block the only line through a pass.
+      let px = v.x + Math.cos(a) * 12, pz = v.z + Math.sin(a) * 12;
+      if (lf.roadDist(px, pz) < 9) {
+        px = v.x - Math.cos(a) * 12; pz = v.z - Math.sin(a) * 12;
+        if (lf.roadDist(px, pz) < 9) continue;
+      }
       list.push({ t: 'lookout', x: px, z: pz, y: field.height(px, pz), yaw: a, s: 1 });
-      list.push({ t: 'flags', x: px + 6, z: pz + 3, y: field.height(px + 6, pz + 3), yaw: a + 1.2, s: 1 });
+      const fx = px + 6, fz = pz + 3;
+      if (lf.roadDist(fx, fz) > 7) {
+        list.push({ t: 'flags', x: fx, z: fz, y: field.height(fx, fz), yaw: a + 1.2, s: 1 });
+      }
     }
     // Pass saddles: prayer flag cluster.
     for (const p of lf.passes) {
@@ -192,6 +215,7 @@ export class Props {
       ) / (2 * e);
       const yaw = rng() * 6.28;
       const r = rng();
+      if (lf.inWater(px, pz)) continue;   // never scatter into a lake
       if (info.trail > 0.4 && sl < 0.2) {
         // Beside a road/trail: signpost, resting spot, scenic bench or a
         // short wooden bridge deck over the trail dip. Chapter 4 fix:
@@ -231,6 +255,7 @@ export class Props {
       const yaw = rng() * 6.28;
       const r = rng();
       if (info.h < 46) continue;           // beach and seabed stay clean
+      if (lf.inWater(px, pz)) continue;    // and so do the lakes
       if (info.trail > 0.25) continue;     // never on a road bed
       if (lf.roadDist(px, pz) < 6.5) continue;
       const e = 5;
