@@ -293,6 +293,7 @@ export class Landforms {
         id: `${r.id}${i}`, range: r.name, x: n[0], z: n[1], h: n[2], w: n[3], name: n[4],
       }));
     }
+    this.lakes = LAKES;   // shoreline queries (vegetation)
     this.passes = [];     // filled by initRoads()
     this.mainRoads = [];  // filled by initRoads()
     this.viewpoints = []; // filled by initViewpoints()

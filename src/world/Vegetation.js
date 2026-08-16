@@ -30,6 +30,9 @@ import { hash01, mulberry32, hashInt, sstep, vnoise } from './noise.js';
 
 const CELL = 125;
 const NEAR_R = 2;   // 5x5 cells full detail  (~312 m)
+const GROUND_R = 1; // 3x3 cells for grass/flowers (~190 m) — Chapter 5B
+                    // distance culling: sward is invisible clutter at
+                    // 300 m but costs instances, matrix writes and fill.
 const FAR_R = 4;    // 9x9 cells impostors    (~562 m)
 const CKEY = 65536;        // integer cell-cache key stride
 const CELL_BUDGET_MS = 0.8; // Chapter 5: per-frame plant-generation budget
@@ -37,12 +40,32 @@ const VEG_STAGGER = 5;      // frames to wait behind the terrain tile fill
 const nowMs = typeof performance !== 'undefined' && performance.now
   ? () => performance.now() : () => Date.now();
 
-// Per-type instance capacities (near / far pools).
-const TYPES = ['pine', 'fir', 'birch', 'oak', 'dead', 'bush', 'fern', 'grass', 'flower', 'shrub'];
-// Trunk collision radius per type (0 = ride-through ground cover).
-const COLL = { pine: 0.42, fir: 0.36, birch: 0.34, oak: 0.55, dead: 0.38,
-  bush: 0, fern: 0, grass: 0, flower: 0, shrub: 0 };
-const CAP_NEAR = { pine: 340, fir: 260, birch: 200, oak: 160, dead: 90, bush: 260, fern: 220, grass: 420, flower: 260, shrub: 200 };
+// ---- Chapter 5B ecosystem ---------------------------------------------------
+// 20 plant models in five families, one InstancedMesh each, all sharing
+// two materials. A mesh with zero instances costs no draw call (three.js
+// skips instanceCount 0), so biome gating keeps the visible set small:
+// reeds only appear near water, alpine grass only high up, and so on.
+const TREES = ['pine', 'fir', 'oak', 'birch', 'dead'];
+const BUSHES = ['bush', 'shrub', 'fern', 'juniper'];
+const GRASSES = ['grass', 'grassTall', 'sedge', 'tussock', 'reed', 'alpineGrass'];
+const FLOWERS = ['flowerY', 'flowerP', 'flowerW'];
+const LOGS = ['logFallen', 'logMossy'];
+// Small ground cover: culled to the inner ring (see GROUND_R).
+const SWARD = {};
+for (const t of ['grass', 'grassTall', 'sedge', 'tussock', 'reed', 'alpineGrass',
+  'flowerY', 'flowerP', 'flowerW']) SWARD[t] = true;
+const TYPES = [...TREES, ...BUSHES, ...GRASSES, ...FLOWERS, ...LOGS];
+// Trunk collision radius per type (0 = ride-through ground cover; fallen
+// logs stay ride-over so they never block a line through a forest).
+const COLL = { pine: 0.42, fir: 0.36, birch: 0.34, oak: 0.55, dead: 0.38 };
+for (const t of [...BUSHES, ...GRASSES, ...FLOWERS, ...LOGS]) COLL[t] = 0;
+const CAP_NEAR = {
+  pine: 340, fir: 280, birch: 200, oak: 160, dead: 90,
+  bush: 240, shrub: 200, fern: 220, juniper: 160,
+  grass: 420, grassTall: 300, sedge: 220, tussock: 240, reed: 140, alpineGrass: 200,
+  flowerY: 200, flowerP: 170, flowerW: 150,
+  logFallen: 70, logMossy: 60,
+};
 const CAP_FAR = { pine: 950, fir: 750, birch: 550, oak: 420, dead: 260 };
 
 export class Vegetation {
@@ -59,7 +82,8 @@ export class Vegetation {
     this._near = {};
     for (const t of TYPES) {
       const geo = GEO_BUILDERS[t]();
-      const m = new THREE.InstancedMesh(geo, t === 'grass' || t === 'flower' || t === 'fern' ? matD : mat, CAP_NEAR[t]);
+      const card = GRASSES.includes(t) || FLOWERS.includes(t) || t === 'fern';
+      const m = new THREE.InstancedMesh(geo, card ? matD : mat, CAP_NEAR[t]);
       m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       m.count = 0;
       m.frustumCulled = false;
@@ -142,11 +166,7 @@ export class Vegetation {
       const mesh = this._near[g.type];
       if (g.slot >= mesh.count) continue; // ring rebuilt since; drop
       const k = t >= 1 ? 1 : 1 - (1 - t) * (1 - t); // ease-out
-      this._p.set(g.p.x, g.p.y, g.p.z);
-      this._e.set(0, g.p.yaw, 0);
-      this._q.setFromEuler(this._e);
-      this._s.setScalar(g.p.s * (0.25 + 0.75 * k));
-      mesh.setMatrixAt(g.slot, this._m.compose(this._p, this._q, this._s));
+      this._write(mesh, g.slot, g.p, 0.25 + 0.75 * k);
       mesh.instanceMatrix.needsUpdate = true;
       if (t < 1) this._growing[write++] = g;
     }
@@ -173,16 +193,42 @@ export class Vegetation {
    * frame budget allows and remembers where it stopped.
    */
   _startCell(cx, cz) {
+    const f = this.field;
+    const ox = cx * CELL, oz = cz * CELL;
+    const rng = mulberry32(hashInt(cx, cz, 0x7e93));
+    // Cell-representative ground: drives how much grows here and what.
+    const hCell = f.height(ox + CELL * 0.5, oz + CELL * 0.5);
+    // Chapter 5B: TREES GET DENSER WITH ELEVATION. The lowland meadows
+    // are open grass, the flanks above ~150 m carry real forest, and it
+    // thins out again at the tree line. Elevation biases the forest
+    // FIELD itself (not just the count), so whole hillsides turn wooded
+    // rather than a few cells getting more trees.
+    const elev = sstep(55, 300, hCell) * (1 - sstep(900, 1200, hCell));
     // Forest density field: patchy woods, not uniform speckle.
-    const forest = vnoise(cx * 0.17 + 3.7, cz * 0.17 - 8.1, 4441);
-    const nTrees = forest > 0.38 ? (3 + (forest - 0.38) * 26) | 0 : 0;
-    const nGround = 5;
+    const forest = vnoise(cx * 0.17 + 3.7, cz * 0.17 - 8.1, 4441) + 0.24 * elev;
+    const woods = Math.max(0, forest - 0.32) * (0.5 + 1.7 * elev);
+    const nTrees = woods > 0 ? Math.min(22, (3 + woods * 34) | 0) : 0;
+    const nGround = 10 + (rng() * 5 | 0);
+
+    // CLUSTERED placement (never a grid): a handful of clumps per cell,
+    // each with its own radius, and every plant is scattered inside one
+    // of them with a sqrt-distributed radius. Between the clumps the
+    // ground stays open, which is what makes scatter read as an
+    // ecosystem instead of confetti.
+    const nc = 2 + (rng() * 3 | 0);
+    const clusters = [];
+    for (let i = 0; i < nc; i++) {
+      clusters.push({
+        x: ox + 10 + rng() * (CELL - 20),
+        z: oz + 10 + rng() * (CELL - 20),
+        r: 11 + rng() * 34,
+        seed: rng(),
+      });
+    }
     return {
       cx, cz, key: cx * CKEY + cz,
-      ox: cx * CELL, oz: cz * CELL,
-      rng: mulberry32(hashInt(cx, cz, 0x7e93)),
-      forest, nTrees, total: nTrees + nGround,
-      i: 0, list: [],
+      ox, oz, rng, forest, elev, nTrees, clusters,
+      total: nTrees + nGround, i: 0, list: [],
     };
   }
 
@@ -192,58 +238,97 @@ export class Vegetation {
     const lf = f.landforms;
     const info = this._info;
     const rng = job.rng;
-    const { ox, oz, forest, nTrees } = job;
+    const { forest, nTrees, clusters } = job;
     const i = job.i++;
-    const x = ox + 6 + rng() * (CELL - 12), z = oz + 6 + rng() * (CELL - 12);
-    if (x >= 30 && x <= 7970 && z >= 30 && z <= 4970) {
+    // Scatter inside a clump: uniform-in-disc offset from its centre.
+    const c = clusters[(rng() * clusters.length) | 0];
+    const ang = rng() * 6.283, rad = c.r * Math.sqrt(rng());
+    const x = c.x + Math.cos(ang) * rad, z = c.z + Math.sin(ang) * rad;
+    // Guards are ordered CHEAPEST FIRST: two squared distances and a
+    // road lookup cost a fraction of a terrain sample, and they reject
+    // most candidates before the expensive work starts.
+    const dmx = x - 4000, dmz = z - 2500;
+    if (x >= 30 && x <= 7970 && z >= 30 && z <= 4970 &&
+        dmx * dmx + dmz * dmz >= 240 * 240 &&
+        !nearViewpoint(lf, x, z) && !lf.inWater(x, z) &&
+        lf.roadDist(x, z) >= 11) {
       f.sample(x, z, info);
       const h = info.h;
-      // No vegetation on the beach / under the sea; keep clear of
-      // roads/trails, the groomed meadow core and the lake.
-      const dMeadow = Math.hypot(x - 4000, z - 2500);
-      // Chapter 6 elevation rebuild: the tree line, the conifer belt and
-      // the shoreline cut-off all move with the new terrain band. 47 m is
-      // just above the inland floor; the beach strip (z > 4420) stays
-      // bare sand.
-      const shore = (z > 4420 && h < 66) || lf.inWater(x, z);
-      if (h >= 47 && !shore && info.trail <= 0.02 && dMeadow >= 240 && lf.roadDist(x, z) >= 11) {
-        // Slope: no trees on cliffs.
+      // Clear of the sea and the beach strip as well.
+      const shore = z > 4420 && h < 66;
+      if (h >= 47 && !shore && info.trail <= 0.02) {
         const e = 5;
-        const sl = Math.hypot(f.height(x + e, z) - f.height(x - e, z),
-          f.height(x, z + e) - f.height(x, z - e)) / (2 * e);
-        if (sl <= 0.55) {
+        // One-sided differences: the slope test costs two samples
+        // instead of four (the centre height is already in `info`).
+        const sl = Math.hypot(f.height(x + e, z) - h, f.height(x, z + e) - h) / e;
+        // Conifers hold ground the rest of the ecosystem cannot: the
+        // slope gate opens up in the belt above 150 m, which is what
+        // lets the forest actually thicken with elevation instead of
+        // stopping dead at the first flank.
+        const slopeMax = i < nTrees && info.h > 150 ? 0.98 : 0.55;
+        if (sl <= slopeMax) {
           const r = rng(), rr = rng();
           const isTree = i < nTrees;
           let t = null, s = 1, ok = true;
           if (isTree) {
-            if (h > 1250) ok = false; // above the tree line
-            else {
-              if (h > 150) {
-                // Foothill conifer belt (starts at the first rise now).
-                t = h > 620 && r < 0.3 ? 'dead' : r < 0.55 ? 'pine' : 'fir';
-              } else {
-                // Lowland broadleaf.
-                t = r < 0.4 ? 'birch' : r < 0.7 ? 'oak' : rr < 0.5 ? 'pine' : 'bush';
-              }
-              if (info.moist < 0.25 && rr < 0.35) t = 'dead';
-              s = 1.15 + rng() * 0.75;
+            if (h > 1250) ok = false;              // above the tree line
+            else if (h > 150) {
+              // Conifer belt: pine and fir, with dead snags in dry spots.
+              t = h > 620 && r < 0.3 ? 'dead' : r < 0.55 ? 'pine' : 'fir';
+            } else {
+              // Lowland broadleaf woods.
+              t = r < 0.4 ? 'birch' : r < 0.7 ? 'oak' : rr < 0.5 ? 'pine' : 'bush';
             }
-          } else if (h > 900 || sl > 0.4) {
+            if (info.moist < 0.25 && rr < 0.35) t = 'dead';
+            s = 1.15 + rng() * 0.75;
+            // Fallen timber only inside real woodland.
+            if (forest > 0.55 && rr > 0.93) {
+              t = rr > 0.965 ? 'logMossy' : 'logFallen';
+              s = 0.85 + rng() * 0.5;
+            }
+          } else if (h > 900 && sl <= 0.4) {
+            // Alpine mat above the forest.
+            t = r < 0.6 ? 'alpineGrass' : r < 0.85 ? 'juniper' : 'tussock';
+            s = 0.7 + rng() * 0.4;
+          } else if (sl > 0.4) {
             ok = false;
+          } else if (lakeNear(lf, x, z)) {
+            // Lakeshore stand.
+            t = r < 0.65 ? 'reed' : 'sedge';
+            s = 0.8 + rng() * 0.5;
+          } else if (forest > 0.5) {
+            // Forest floor: ferns, brush and juniper mats.
+            t = r < 0.4 ? 'fern' : r < 0.65 ? 'bush' : r < 0.85 ? 'shrub' : 'juniper';
+            s = 0.75 + rng() * 0.5;
+          } else if (info.moist < 0.34) {
+            // Dry open country: bunch grass and the odd shrub.
+            t = r < 0.55 ? 'tussock' : r < 0.8 ? 'grass' : 'shrub';
+            s = 0.75 + rng() * 0.5;
           } else {
-            // Ground cover: grass/flowers in the open, ferns/shrubs in woods.
-            if (forest > 0.5) t = r < 0.5 ? 'fern' : r < 0.8 ? 'bush' : 'shrub';
-            else t = r < 0.5 ? 'grass' : r < 0.75 ? 'flower' : 'shrub';
+            // Damp open meadow: mixed sward and wildflower drifts. The
+            // clump's own seed picks which flower colour dominates, so
+            // drifts come out single-coloured like real ones.
+            if (r < 0.34) t = 'grass';
+            else if (r < 0.56) t = 'grassTall';
+            else if (r < 0.7) t = info.moist > 0.55 ? 'sedge' : 'tussock';
+            else if (r < 0.92) {
+              t = c.seed < 0.4 ? 'flowerY' : c.seed < 0.75 ? 'flowerP' : 'flowerW';
+            } else t = 'shrub';
             s = 0.75 + rng() * 0.5;
           }
           if (ok && t) {
-            // Seat on the LOWEST nearby ground so trunks never float on
-            // slopes (the models sink a few cm into the hill instead).
-            const rF = isTree ? 0.9 : 0.5;
-            const y = Math.min(h,
-              f.height(x + rF, z), f.height(x - rF, z),
-              f.height(x, z + rF), f.height(x, z - rF)) - 0.06 * s;
-            job.list.push({ t, x, z, y, yaw: rng() * 6.283, s, tree: isTree });
+            const isLog = t === 'logFallen' || t === 'logMossy';
+            // Seat on the LOWEST nearby ground so trunks never float on a
+            // slope. Trees check their whole footprint; ground cover is
+            // small enough that two probes are indistinguishable and
+            // halve the cost of the commonest case.
+            const isBig = (isTree && !isLog) || isLog;
+            const rF = isBig ? 0.9 : 0.5;
+            const y = (isBig
+              ? Math.min(h, f.height(x + rF, z), f.height(x - rF, z),
+                f.height(x, z + rF), f.height(x, z - rF))
+              : Math.min(h, f.height(x + rF, z), f.height(x, z + rF))) - 0.06 * s;
+            job.list.push({ t, x, z, y, yaw: rng() * 6.283, s, tree: isTree && !isLog });
           }
         }
       }
@@ -253,6 +338,12 @@ export class Vegetation {
 
   /** Store a finished cell job in the LRU cache and return its list. */
   _cacheCell(job) {
+    // Trees are generated first, so the far ring (which only draws tree
+    // impostors) can stop after the tree prefix instead of walking every
+    // blade of grass in all 81 cells of the window.
+    let treeN = 0;
+    for (let i = 0; i < job.list.length; i++) if (job.list[i].tree) treeN = i + 1;
+    job.list.treeN = treeN;
     // LRU-ish bound: drop the OLDEST entries instead of wiping the whole
     // cache (a full clear meant every cell around the player had to be
     // regenerated on the very next crossing).
@@ -299,7 +390,9 @@ export class Vegetation {
     const growNow = performance.now();
     for (let dz = -R; dz <= R; dz++) {
       for (let dx = -R; dx <= R; dx++) {
-        const nearRing = Math.max(Math.abs(dx), Math.abs(dz)) <= NEAR_R;
+        const ring = Math.max(Math.abs(dx), Math.abs(dz));
+        const nearRing = ring <= NEAR_R;
+        const groundRing = ring <= GROUND_R;
         const cellKey = (cx + dx) * CKEY + (cz + dz);
         const isNewNear = nearRing && !prevCells.has(cellKey) && prevCells.size > 0;
         // Generate this cell's plant list only while inside the frame
@@ -312,15 +405,17 @@ export class Vegetation {
           if (!plants) { pending = true; continue; }
         }
         if (nearRing) nowCells.add(cellKey);
-        for (let pi = 0; pi < plants.length; pi++) {
+        const nPlants = nearRing ? plants.length : (plants.treeN || 0);
+        for (let pi = 0; pi < nPlants; pi++) {
           const p = plants[pi];
           // Density thinning: deterministic per-plant keep test.
           if (den < 1 && hash01(pi, p.x | 0, 0x5c1) > den) continue;
           if (nearRing) {
+            // Ground cover is culled to the inner ring.
+            if (!groundRing && SWARD[p.t]) continue;
             const n = nearCounts[p.t];
             if (n >= CAP_NEAR[p.t]) continue;
-            this._compose(p);
-            this._near[p.t].setMatrixAt(n, this._m);
+            this._write(this._near[p.t], n, p, 1);
             nearCounts[p.t] = n + 1;
             const cr = COLL[p.t];
             if (cr > 0) this.colliders.push({ x: p.x, z: p.z, r: cr * p.s });
@@ -332,8 +427,7 @@ export class Vegetation {
           } else if (CAP_FAR[p.t] !== undefined) {
             const n = farCounts[p.t];
             if (n >= CAP_FAR[p.t]) continue;
-            this._compose(p);
-            this._far[p.t].setMatrixAt(n, this._m);
+            this._write(this._far[p.t], n, p, 1);
             farCounts[p.t] = n + 1;
           }
         }
@@ -363,6 +457,25 @@ export class Vegetation {
     this._q.setFromEuler(this._e);
     this._s.setScalar(p.s);
     this._m.compose(this._p, this._q, this._s);
+  }
+
+  /**
+   * Chapter 5B: write an instance transform STRAIGHT into the instance
+   * buffer. Every plant is a yaw rotation plus a uniform scale, so the
+   * Vector3 / Euler / Quaternion / Matrix4.compose / setMatrixAt chain
+   * (five objects and a copy per plant) reduces to sixteen float stores.
+   * With ~2,400 instances rewritten whenever the window moves, this is
+   * the difference between a 6 ms hitch and a fraction of a millisecond.
+   */
+  _write(mesh, slot, p, scale) {
+    const a = mesh.instanceMatrix.array;
+    const o = slot * 16;
+    const S = p.s * scale;
+    const c = Math.cos(p.yaw) * S, sn = Math.sin(p.yaw) * S;
+    a[o] = c; a[o + 1] = 0; a[o + 2] = -sn; a[o + 3] = 0;
+    a[o + 4] = 0; a[o + 5] = S; a[o + 6] = 0; a[o + 7] = 0;
+    a[o + 8] = sn; a[o + 9] = 0; a[o + 10] = c; a[o + 11] = 0;
+    a[o + 12] = p.x; a[o + 13] = p.y; a[o + 14] = p.z; a[o + 15] = 1;
   }
 }
 
@@ -475,24 +588,6 @@ const GEO_BUILDERS = {
     }
     return mergeGeometries(parts);
   },
-  /** Flowers: grass tuft + 5 colored heads. */
-  flower() {
-    const parts = [];
-    for (let i = 0; i < 2; i++) {
-      const p = new THREE.PlaneGeometry(0.7, 0.4);
-      p.rotateY((i / 2) * Math.PI);
-      p.translate(0, 0.2, 0);
-      parts.push(colored(p, 0.4, 0.56, 0.25, 0.06));
-    }
-    const cols = [[0.95, 0.75, 0.2], [0.9, 0.4, 0.5], [0.85, 0.85, 0.9], [0.75, 0.45, 0.85], [0.95, 0.55, 0.25]];
-    for (let i = 0; i < 5; i++) {
-      const b = new THREE.IcosahedronGeometry(0.07, 0);
-      b.translate((hash01(i, 3, 9) - 0.5) * 0.7, 0.36 + hash01(i, 5, 11) * 0.14, (hash01(i, 7, 13) - 0.5) * 0.7);
-      const c = cols[i];
-      parts.push(colored(b, c[0], c[1], c[2], 0.03));
-    }
-    return mergeGeometries(parts);
-  },
   /** Small shrub: single squashed icosahedron, drier tint. */
   shrub() {
     const a = new THREE.IcosahedronGeometry(0.6, 0);
@@ -500,7 +595,141 @@ const GEO_BUILDERS = {
     a.translate(0, 0.36, 0);
     return colored(a, 0.38, 0.44, 0.22, 0.08);
   },
+  /** Juniper: low spreading conifer mat with a dark blue-green tint. */
+  juniper() {
+    const parts = [];
+    for (let i = 0; i < 3; i++) {
+      const a = new THREE.IcosahedronGeometry(0.62 - i * 0.1, 0);
+      a.scale(1.5, 0.45, 1.5);
+      a.translate(Math.cos(i * 2.1) * 0.45, 0.24 + i * 0.12, Math.sin(i * 2.1) * 0.45);
+      parts.push(colored(a, 0.17, 0.32, 0.24, 0.05));
+    }
+    return mergeGeometries(parts);
+  },
+  /** Tall grass: 5 taller crossed blades, lighter and airier. */
+  grassTall() {
+    const parts = [];
+    for (let i = 0; i < 5; i++) {
+      const p = new THREE.PlaneGeometry(0.55, 1.05);
+      p.rotateZ((i - 2) * 0.12);
+      p.rotateY((i / 5) * Math.PI);
+      p.translate(0, 0.52, 0);
+      parts.push(colored(p, 0.47, 0.6, 0.27, 0.07));
+    }
+    return mergeGeometries(parts);
+  },
+  /** Sedge: stiff dark clump for damp ground. */
+  sedge() {
+    const parts = [];
+    for (let i = 0; i < 4; i++) {
+      const p = new THREE.PlaneGeometry(0.4, 0.8);
+      p.rotateZ((i - 1.5) * 0.22);
+      p.rotateY((i / 4) * Math.PI);
+      p.translate(0, 0.4, 0);
+      parts.push(colored(p, 0.28, 0.48, 0.24, 0.06));
+    }
+    return mergeGeometries(parts);
+  },
+  /** Tussock: dry straw-coloured bunch grass of the open basins. */
+  tussock() {
+    const parts = [];
+    for (let i = 0; i < 4; i++) {
+      const p = new THREE.PlaneGeometry(0.85, 0.42);
+      p.rotateY((i / 4) * Math.PI);
+      p.translate(0, 0.2, 0);
+      parts.push(colored(p, 0.63, 0.58, 0.3, 0.08));
+    }
+    return mergeGeometries(parts);
+  },
+  /** Reed: lakeshore stand, tall and narrow. */
+  reed() {
+    const parts = [];
+    for (let i = 0; i < 5; i++) {
+      const p = new THREE.PlaneGeometry(0.26, 1.35);
+      p.rotateZ((i - 2) * 0.09);
+      p.rotateY((i / 5) * Math.PI * 1.2);
+      p.translate((i - 2) * 0.09, 0.68, 0);
+      parts.push(colored(p, 0.4, 0.53, 0.26, 0.05));
+    }
+    return mergeGeometries(parts);
+  },
+  /** Alpine grass: short, blue-green, hugging the ground up high. */
+  alpineGrass() {
+    const parts = [];
+    for (let i = 0; i < 3; i++) {
+      const p = new THREE.PlaneGeometry(0.7, 0.3);
+      p.rotateY((i / 3) * Math.PI);
+      p.translate(0, 0.15, 0);
+      parts.push(colored(p, 0.36, 0.5, 0.33, 0.06));
+    }
+    return mergeGeometries(parts);
+  },
+  flowerY() { return flowerOf(0.95, 0.82, 0.22); },
+  flowerP() { return flowerOf(0.72, 0.42, 0.85); },
+  flowerW() { return flowerOf(0.93, 0.93, 0.95); },
+  /** Fallen log: a bare trunk lying in the grass with a broken stub. */
+  logFallen() {
+    const g = new THREE.CylinderGeometry(0.26, 0.32, 3.4, 6);
+    g.rotateZ(Math.PI / 2);
+    g.translate(0, 0.3, 0);
+    const stub = new THREE.CylinderGeometry(0.1, 0.14, 0.7, 5);
+    stub.rotateZ(0.9);
+    stub.translate(1.3, 0.55, 0.15);
+    return mergeGeometries([colored(g, 0.42, 0.33, 0.24, 0.05),
+      colored(stub, 0.4, 0.31, 0.22, 0.04)]);
+  },
+  /** Mossy log: shorter, greener, half sunk into the forest floor. */
+  logMossy() {
+    const g = new THREE.CylinderGeometry(0.3, 0.34, 2.4, 6);
+    g.rotateZ(Math.PI / 2);
+    g.translate(0, 0.24, 0);
+    const moss = new THREE.IcosahedronGeometry(0.33, 0);
+    moss.scale(2.6, 0.4, 1.0);
+    moss.translate(0, 0.44, 0);
+    return mergeGeometries([colored(g, 0.36, 0.3, 0.23, 0.04),
+      colored(moss, 0.26, 0.42, 0.22, 0.06)]);
+  },
 };
+
+/** Wildflower of a given head colour: grass tuft + 6 blossom heads. */
+function flowerOf(cr, cg, cb) {
+  const parts = [];
+  for (let i = 0; i < 2; i++) {
+    const p = new THREE.PlaneGeometry(0.7, 0.4);
+    p.rotateY((i / 2) * Math.PI);
+    p.translate(0, 0.2, 0);
+    parts.push(colored(p, 0.4, 0.56, 0.25, 0.06));
+  }
+  for (let i = 0; i < 6; i++) {
+    const b = new THREE.IcosahedronGeometry(0.075, 0);
+    b.translate((hash01(i, 3, 9) - 0.5) * 0.72,
+      0.34 + hash01(i, 5, 11) * 0.18, (hash01(i, 7, 13) - 0.5) * 0.72);
+    parts.push(colored(b, cr, cg, cb, 0.04));
+  }
+  return mergeGeometries(parts);
+}
+
+/** Viewpoints keep their sight lines open — nothing is planted inside. */
+function nearViewpoint(lf, x, z) {
+  const vps = lf.viewpoints;
+  if (!vps) return false;
+  for (let i = 0; i < vps.length; i++) {
+    const dx = x - vps[i].x, dz = z - vps[i].z;
+    if (dx * dx + dz * dz < 46 * 46) return true;
+  }
+  return false;
+}
+
+/** Within a lake's shoreline band (reeds and sedge grow there). */
+function lakeNear(lf, x, z) {
+  const ls = lf.lakes || [];
+  for (let i = 0; i < ls.length; i++) {
+    const l = ls[i];
+    const d = Math.hypot(x - l.x, z - l.z);
+    if (d < l.r * 1.5 && d > l.r * 0.95) return true;
+  }
+  return false;
+}
 
 /** Far impostor: one 6-face cone+trunk silhouette, species-tinted. */
 function buildImpostor(t) {

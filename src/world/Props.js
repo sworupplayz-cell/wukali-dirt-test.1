@@ -249,7 +249,7 @@ export class Props {
     // models, so it costs zero extra draw calls. Everything is placed in
     // CLUSTERS (a big stone with two or three smaller companions), which
     // is what makes scatter read as natural rather than sprinkled.
-    for (let i = 0; i < 9; i++) {
+    for (let i = 0; i < 7; i++) {
       const px = ox + 25 + rng() * 450, pz = oz + 25 + rng() * 450;
       field.sample(px, pz, info);
       const yaw = rng() * 6.28;
@@ -274,17 +274,57 @@ export class Props {
         t = r < 0.45 ? 'rocks' : r < 0.7 ? 'boulder' : r < 0.85 ? 'scree' : 'slab';
       }
       const s0 = 0.5 + rng() * 0.55;
-      list.push({ t, x: px, z: pz, y: field.height(px, pz), yaw, s: s0 });
-      const n = rng() < 0.55 ? 2 : 1;
-      for (let k = 0; k < n; k++) {
-        const a = rng() * 6.28, d = 2.4 + rng() * 4.6;
-        const qx = px + Math.cos(a) * d, qz = pz + Math.sin(a) * d;
-        if (lf.roadDist(qx, qz) < 6) continue;
-        list.push({
-          t: rng() < 0.45 ? 'scree' : t,
-          x: qx, z: qz, y: field.height(qx, qz),
-          yaw: rng() * 6.28, s: s0 * (0.42 + rng() * 0.38),
-        });
+      // Chapter 5B: FOUR ROCK-CLUSTER ARRANGEMENTS, built from the five
+      // existing instanced rock models — so the ground reads as four
+      // different kinds of formation without a single extra draw call.
+      //   0 FIELD  loose scatter of small stones
+      //   1 CAIRN  one big stone with its broken pieces tucked in close
+      //   2 SPILL  a talus line running down the fall line
+      //   3 RING   stones thrown out around a bare middle
+      const arrangement = (rng() * 4) | 0;
+      const eN = 6;
+      const dhx = field.height(px + eN, pz) - field.height(px - eN, pz);
+      const dhz = field.height(px, pz + eN) - field.height(px, pz - eN);
+      const fall = Math.atan2(-dhx, -dhz); // downhill bearing
+      const place = (qx, qz, qt, qs) => {
+        if (lf.roadDist(qx, qz) < 6 || lf.inWater(qx, qz)) return;
+        // No height sample here: rebuild() seats every prop on its
+        // footprint and caches the result (Chapter 5), so sampling the
+        // ground now would just be a second terrain query per stone.
+        list.push({ t: qt, x: qx, z: qz, y: 0, yaw: rng() * 6.28, s: qs });
+      };
+      if (arrangement === 1) {
+        place(px, pz, t, s0 * 1.35);
+        for (let k = 0; k < 3; k++) {
+          const a = rng() * 6.28, d = 1.6 + rng() * 1.8;
+          place(px + Math.cos(a) * d, pz + Math.sin(a) * d,
+            rng() < 0.5 ? 'scree' : 'rocks', s0 * (0.3 + rng() * 0.3));
+        }
+      } else if (arrangement === 2) {
+        const n = 3 + ((rng() * 3) | 0);
+        for (let k = 0; k < n; k++) {
+          const d = k * (3.2 + rng() * 2.6);
+          const jx = (rng() - 0.5) * 3.4, jz = (rng() - 0.5) * 3.4;
+          place(px + Math.sin(fall) * d + jx, pz + Math.cos(fall) * d + jz,
+            k === 0 ? t : rng() < 0.6 ? 'scree' : 'rocks',
+            s0 * (0.9 - k * 0.14));
+        }
+      } else if (arrangement === 3) {
+        const n = 4 + ((rng() * 3) | 0), rr = 4.5 + rng() * 4;
+        for (let k = 0; k < n; k++) {
+          const a = (k / n) * 6.28 + rng() * 0.5;
+          place(px + Math.cos(a) * rr, pz + Math.sin(a) * rr,
+            rng() < 0.35 ? t : rng() < 0.6 ? 'rocks' : 'scree',
+            s0 * (0.45 + rng() * 0.4));
+        }
+      } else {
+        place(px, pz, t, s0);
+        const n = rng() < 0.55 ? 2 : 1;
+        for (let k = 0; k < n; k++) {
+          const a = rng() * 6.28, d = 2.4 + rng() * 4.6;
+          place(px + Math.cos(a) * d, pz + Math.sin(a) * d,
+            rng() < 0.45 ? 'scree' : t, s0 * (0.42 + rng() * 0.38));
+        }
       }
     }
 

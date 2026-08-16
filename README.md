@@ -2,7 +2,7 @@
 
 A lightweight, Android-first, 3D off-road dirt-bike game.
 
-**Current status: Chapter 5A — Terrain generation rework.** The world has grown
+**Current status: Chapter 5B — Vegetation & ecosystem.** The world has grown
 from 32 km2 to 40 km2 (8,000 x 5,000 m, 160 streamed sectors) with five
 distinct regions: Rider's Meadow in the center (spawn, lake, cabins),
 the Glacier Wall in the north (five 820-1,290 m peaks), the Volcanic
@@ -118,7 +118,41 @@ gives it landmarks you navigate by:
 
 Every feature is a smooth analytic blob (quartic falloff / smoothstep
 rims) and corridor-aware, so none of them can add a wall or bend a road
-past its grade limit. Two placement bugs surfaced and were fixed on the
+past its grade limit.
+
+**Chapter 5B** populates that terrain with an ecosystem — vegetation
+only; terrain, roads, physics, camera, UI, streaming and the save system
+are untouched:
+
+- **20 plant models in five families**: 5 trees (pine, fir, oak, birch,
+  dead), 4 bushes (bush, shrub, fern, juniper), 6 grasses (meadow grass,
+  tall grass, sedge, tussock, reed, alpine grass), 3 wildflower colours
+  (yellow, purple, white) and 2 fallen logs — plus 4 rock-cluster
+  arrangements (field, cairn, talus spill, ring) built from the existing
+  instanced rock models, so they cost no extra draw call.
+- **Clustered placement, never a grid**: each 125 m cell picks 2-4 clumps
+  with their own radius and every plant is scattered inside one of them
+  with a sqrt-distributed radius, so the ground between clumps stays
+  open. A clump's seed also picks which wildflower colour dominates it,
+  which is why drifts come out single-coloured.
+- **Biomes**: conifer belt above 150 m, lowland broadleaf below it, dead
+  snags in dry ground, ferns and juniper on the forest floor, tussock in
+  the dry basins, reeds and sedge on the lake shores, alpine mat above
+  900 m, fallen timber only inside real woodland.
+- **Denser with elevation**: elevation biases the forest *field* itself,
+  so whole hillsides turn wooded (about 5.5 trees per cell in the
+  lowland, 7.3 in the 100-200 m belt, thinning again at the tree line),
+  and the slope gate opens for conifers so they can hold a real flank.
+- **Roads and viewpoints stay clear**: 11 m off every bed, and nothing is
+  planted within 46 m of a viewpoint so the view stays open. Nothing
+  grows in a lake.
+- **Optimisation**: GPU instancing (one InstancedMesh per model), two
+  shared materials, fixed-capacity instance pools, LOD impostors past
+  250 m, and ground cover culled to the inner ~190 m ring. Instance
+  transforms are written straight into the instance buffer (sixteen
+  float stores instead of a Vector3/Euler/Quaternion/Matrix4 chain per
+  plant), and the far ring iterates only each cell's tree prefix. No
+  texture anywhere is above 512 px; vegetation is untextured. Two placement bugs surfaced and were fixed on the
 way: roadside fences could stand across a curving bed (a 6 m solid run
 offset only by the half-width) and a viewpoint platform could land on the
 road — both now verify clearance before placing. Road beds are relaxed onto the ground under a fill cap instead of
