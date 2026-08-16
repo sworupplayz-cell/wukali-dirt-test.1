@@ -67,8 +67,11 @@ export class SectorWorld {
     this._spawn = { x: sx, y: this.field.height(sx, sz), z: sz, yaw: 0 }; // facing the crossroads + practice jump
 
     // Lakes: one static water disc each (1 draw call apiece).
+    // Chapter 4R render fix: transparent water must not write depth —
+    // depth-writing transparency z-fights the terrain at grazing angles
+    // (visible shimmer on the lake rims and the surf line).
     const waterMat = new THREE.MeshLambertMaterial({
-      color: 0x3f7fae, transparent: true, opacity: 0.88,
+      color: 0x3f7fae, transparent: true, opacity: 0.88, depthWrite: false,
     });
     for (const l of LAKES) {
       const water = new THREE.Mesh(new THREE.CircleGeometry(l.r * 0.92, 28), waterMat);
@@ -84,7 +87,7 @@ export class SectorWorld {
     // the sea floor stays shallow).
     const sea = new THREE.Mesh(
       new THREE.PlaneGeometry(WORLD_W + 4000, 1400),
-      new THREE.MeshLambertMaterial({ color: 0x2e6da0, transparent: true, opacity: 0.92 })
+      new THREE.MeshLambertMaterial({ color: 0x2e6da0, transparent: true, opacity: 0.92, depthWrite: false })
     );
     sea.rotation.x = -Math.PI / 2;
     sea.position.set(WORLD_W / 2, SEA_LEVEL, WORLD_H - 300);

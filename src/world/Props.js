@@ -57,13 +57,24 @@ export class Props {
       lookout: { geo: buildLookout(), max: CAP.lookout, mat,
         shape: [[-1.4, -1, 0.35], [1.4, -1, 0.35], [-1.4, 1, 0.35], [1.4, 1, 0.35]] }, // legs
       cabin: { geo: buildCabin(), max: CAP.cabin, mat, coll: 3.2 },
-      cave: { geo: buildCave(), max: CAP.cave, mat, coll: 3.0 },
+      // Chapter 4R cave collision: the rock jambs are solid walls (two
+      // circles each so there is no gap at any scale) but the sculpted
+      // mouth between them stays OPEN — the entrance is real, not a
+      // painted-on facade behind an invisible wall.
+      cave: { geo: buildCave(), max: CAP.cave, mat,
+        shape: [[-1.7, -0.3, 0.85], [-2.1, 0.3, 0.7],
+                [1.7, -0.3, 0.85], [2.1, 0.3, 0.7]] },
       rest: { geo: buildRest(), max: CAP.rest, mat,
         shape: [[0, -1.1, 0.5], [0, 0.5, 0.8]] },            // log + fire ring
       bench: { geo: buildBench(), max: CAP.bench, mat, shape: [[0, 0, 0.9]] },
       bridge: { geo: buildBridge(), max: CAP.bridge, mat,
-        shape: [[-1.75, -1.62, 0.3], [1.75, -1.62, 0.3],
-                [-1.75, 1.62, 0.3], [1.75, 1.62, 0.3]] },    // rail posts; deck rideable
+        // Chapter 4R: FULL rail runs collide (posts + mid-rail fillers) —
+        // the deck stays rideable end-to-end, but the bike can no longer
+        // slip sideways through the gap between rail posts.
+        shape: [[-1.75, -1.62, 0.3], [-0.85, -1.62, 0.45], [0, -1.62, 0.45],
+                [0.85, -1.62, 0.45], [1.75, -1.62, 0.3],
+                [-1.75, 1.62, 0.3], [-0.85, 1.62, 0.45], [0, 1.62, 0.45],
+                [0.85, 1.62, 0.45], [1.75, 1.62, 0.3]] },
       arch: { geo: buildArch(), max: CAP.arch, mat,
         shape: [[-3.2, 0, 1.15], [3.2, 0, 1.15]] },          // pillars; gate rideable
       fence: { geo: buildFence(), max: CAP.fence, mat,
