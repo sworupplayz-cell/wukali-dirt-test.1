@@ -52,19 +52,36 @@ export class TerrainField {
   _base(x, z) {
     const lf = this.landforms;
     const corr = lf.corridor(x, z);
-    // Valley/plain band: 100-350 m, long wavelength. Inside a road
+    // Regional shaping (Phase 3.1): the base plain tilts by compass
+    // direction from the spawn — south = low grasslands & lakes, west =
+    // wide low valleys, north/east rise gently toward the ranges.
+    // 0 at spawn latitude/longitude, +-1 at the world edges.
+    const nz = (z - 2000) / 2000;  // -1 north edge .. +1 south edge
+    const nx = (x - 4000) / 4000;  // -1 west edge .. +1 east edge
+    const regional =
+      -26 * Math.max(0, nz) +               // south: grassland shelf drops
+      -22 * Math.max(0, -nx) +              // west: wide valleys sit low
+      26 * Math.max(0, -nz) +               // north: gentle rise to the wall
+      18 * Math.max(0, nx);                 // east: rise toward the passes
+    // Valley/plain band: 100-300 m, long wavelength, halved amplitude in
+    // the southern grasslands (rolling, never hilly). Inside a road
     // corridor the band relaxes toward its midpoint — the corridor IS
     // the valley (roads first), so roads never face deep cut benches.
+    const south = sstep(0.1, 0.7, nz);
     const band = fbm2(x * 0.00055, z * 0.00055, SEED);
-    const plain = 115 + band * 210;
-    let h = 190 + (plain - 190) * (1 - 0.6 * corr);
+    const plain = 115 + band * 210 * (1 - 0.55 * south);
+    let h = regional + 175 + (plain - 190) * (1 - 0.6 * corr);
 
-    // Rolling hills — suppressed in road corridors and the meadow.
+    // Rolling hills — suppressed in road corridors and the meadow;
+    // strongest in the SOUTH-WEST (the rolling-countryside region),
+    // softened in the southern grasslands.
+    const swBoost = 1 + 0.7 * sstep(0.15, 0.7, nz) * sstep(-0.15, -0.7, nx);
     const open = (1 - 0.85 * corr) * (1 - lf.meadowMask(x, z));
-    h += (vnoise(x * 0.0028 + 13.7, z * 0.0028 - 7.1, SEED + 5) - 0.5) * 34 * open;
+    h += (vnoise(x * 0.0028 + 13.7, z * 0.0028 - 7.1, SEED + 5) - 0.5) * 34 *
+      open * swBoost * (1 - 0.5 * south * (1 - 0.6 * swBoost));
     h += (vnoise(x * 0.009 + 3.1, z * 0.009 + 9.4, SEED + 7) - 0.5) * 7 * open;
 
-    // Mountain ranges (scenery, corridor-suppressed inside).
+    // Mountain ranges (scenery, corridor- and spawn-basin-suppressed).
     h += lf.mountains(x, z);
 
     // Rider's Meadow: flatten to the meadow plane, tiny undulation kept.
@@ -73,8 +90,9 @@ export class TerrainField {
       const meadowH = MEADOW.e +
         (vnoise(x * 0.006 + 31.7, z * 0.006 - 12.9, SEED + 11) - 0.5) * 3.2;
       h += (meadowH - h) * mm;
-      h -= lf.lakeDepth(x, z) * mm;
     }
+    // Lakes carve everywhere they exist (meadow + southern grasslands).
+    h -= lf.lakeDepth(x, z);
     return h;
   }
 
@@ -104,7 +122,14 @@ export class TerrainField {
       trail = this._trailMask(x, z) * (1 - mtnN) * (1 - mm);
       const bumps = (vnoise(x * 0.034 + 3.3, z * 0.034 - 9.9, SEED + 21) - 0.5) *
         0.9 * (1 - 0.85 * trail) * (1 - 0.7 * mtnN) * (1 - mm);
-      h += bumps + this._jumpAt(x, z) * (1 - mtnN) * (1 - mm);
+      let jump = this._jumpAt(x, z) * (1 - mtnN) * (1 - mm);
+      if (jump > 0.01) {
+        // A trail kicker crossing a MAIN/PASS road bed would leave a
+        // wall on the road apron — fade kickers out within 30 m of any
+        // laid road centerline (only costs a hash scan when jump > 0).
+        jump *= sstep(14, 30, lf.roadDist(x, z));
+      }
+      h += bumps + jump;
     }
 
     // Roads ride ON the final surface.

@@ -2,21 +2,20 @@
 
 A lightweight, Android-first, 3D off-road dirt-bike game.
 
-**Current status: Phase 3 — Rideable world redesign (roads-first).** The
-world was rebuilt on a reduced 8,000 x 4,000 m map (128 permanent 500 m
-sectors, 16x8) with a new design philosophy: ROADS are generated first,
-mountains are scenery. The Horizon Loop (7 m main road, 15.3 km) circles
-the whole map and four arms meet at a 4-way crossroads in RIDER'S MEADOW —
-a handcrafted spawn area at the world center with a small lake, gentle
-grass hills, a signpost, an abandoned cabin, scenic benches and a practice
-jump. Main-road corridors suppress the landforms around them (the corridor
-IS the valley), 4 connected perimeter ranges hold 16 named peaks (highest
-Kanjiro Peak ~2200 m) built from a new domain-warped spine-profile
-algorithm (the old mountain algorithm is deleted), 6 switchback pass roads
-cross the range saddles, and a hidden lowland trail grid with kickers fills
-the interior. Road-computed viewpoints, instanced landmark props (now with
-scenic benches and wooden bridge decks), the far-LOD backdrop and the F3
-overlay (road type, elevation, sector, loaded, slope) all carry over.
+**Current status: Phase 3.1 — Open valley spawn redesign.** The spawn
+mountain bowl is gone. Rider's Meadow (r 600 m, elevation ~165 m) now sits
+in an OPEN VALLEY: no near-horizon wall exceeds ~4.5 deg in any direction,
+the nearest serious mountain is 1.4 km away, and the massifs are suppressed
+entirely within 1 km of spawn (full height only beyond ~1.8 km). Mountain
+distribution is directional: North = Northwall (major range), North-East =
+Kanjiro Massif (highest peaks, ~2180 m), East = Eastguard (the pass/canyon
+region), South = grasslands & lakes (two extra lakes on the South Arm),
+South-West = boosted rolling hills, West = wide low valleys. The four
+meadow roads lead N (alpine), E (canyon passes), S (lakes), W (rolling
+countryside). Road blending was rebuilt as a saturating weighted blend —
+continuous everywhere, no more Voronoi/eligibility walls — and trail
+kickers fade out near main roads. All handcrafted meadow features remain:
+lake, cabin, signpost, benches, practice jump, 4-way crossroads.
 
 ## Tech
 

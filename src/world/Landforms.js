@@ -37,51 +37,55 @@ import { vnoise, sstep } from './noise.js';
 
 export const WORLD_W = 8000;
 export const WORLD_H = 4000;
-export const MEADOW = { x: 4000, z: 2000, r: 600, e: 190 };
+export const MEADOW = { x: 4000, z: 2000, r: 600, e: 165 };
 export const LAKE = { x: 4230, z: 2210, r: 90, depth: 6 };
+// Phase 3.1: the south is grasslands & LAKES — two more water bodies on
+// the way down the South Arm (meadow lake first for back-compat).
+export const LAKES = [
+  LAKE,
+  { x: 3620, z: 3120, r: 140, depth: 7 },
+  { x: 4780, z: 3380, r: 110, depth: 6 },
+];
 
 const S = 733;
 
 // ---- 4. Mountain ranges (scenery): spine nodes [x, z, H, W, name] ----------
-// Connected perimeter rim — each range's end pedestals overlap the next.
+// Phase 3.1 redistribution — the spawn bowl is gone:
+//   N  : Northwall (major range, pushed to the top edge)
+//   NE : Kanjiro Massif (the highest peaks, 2000-2200 m)
+//   E  : Eastguard (moderate, carries the mountain passes; the Horizon
+//        Loop squeezes between its walls = the canyon region)
+//   S  : open grasslands & lakes (NO range)
+//   SW : rolling hills only (no range)
+//   W  : wide valleys (no range)
+// Everything serious sits 2+ km of riding from Rider's Meadow; an open
+// spawn basin mask additionally suppresses any massif within ~1.8 km.
 const RANGES = [
   {
     id: 'N', name: 'Northwall',
     nodes: [
-      [700, 500, 1050, 520, 'Vetra Peak'],
-      [2100, 350, 1350, 660, 'Mistral Horn'],
-      [3900, 280, 1250, 620, 'Sorren Dome'],
-      [5700, 350, 1900, 1100, 'Kanjiro Peak'],
-      [7300, 500, 1200, 590, 'Eastwatch'],
+      [1500, 280, 1000, 500, 'Vetra Peak'],
+      [2600, 220, 1300, 620, 'Mistral Horn'],
+      [3800, 250, 1150, 560, 'Sorren Dome'],
+      [4900, 300, 1400, 640, 'Thornspire'],
     ],
-    dips: [0.30, 0.34, 0.30, 0.34],
+    dips: [0.32, 0.30, 0.33],
   },
   {
-    id: 'S', name: 'Southern Reach',
+    id: 'K', name: 'Kanjiro Massif',
     nodes: [
-      [700, 3500, 1000, 500, 'Lowen Tor'],
-      [2300, 3650, 1400, 690, 'Umberfang'],
-      [4100, 3720, 1500, 740, 'Serpent Crown'],
-      [5900, 3650, 1300, 640, 'Dravok Peak'],
-      [7300, 3500, 1050, 520, 'Suntooth'],
+      [6200, 420, 1700, 800, 'Vel Morra'],
+      [7050, 560, 1890, 1000, 'Kanjiro Peak'],
+      [7720, 950, 1500, 680, 'Eastwatch'],
     ],
-    dips: [0.32, 0.30, 0.32, 0.34],
-  },
-  {
-    id: 'W', name: 'Westgate',
-    nodes: [
-      [450, 1300, 950, 480, 'Thornspire'],
-      [380, 2000, 1250, 620, 'Vel Morra'],
-      [450, 2700, 1000, 500, 'Greywall'],
-    ],
-    dips: [0.33, 0.33],
+    dips: [0.28, 0.30],
   },
   {
     id: 'E', name: 'Eastguard',
     nodes: [
-      [7550, 1300, 1000, 500, 'Fenn Ridge'],
-      [7620, 2000, 1350, 660, 'Harrow Peak'],
-      [7550, 2700, 1050, 520, 'Ghantir Knab'],
+      [7700, 1500, 1050, 500, 'Fenn Ridge'],
+      [7800, 2100, 1300, 580, 'Harrow Peak'],
+      [7700, 2700, 1000, 480, 'Ghantir Knab'],
     ],
     dips: [0.33, 0.33],
   },
@@ -105,7 +109,9 @@ const MAIN_ROUTES = [
 ];
 
 // ---- 5. Pass roads: [rangeIdx, gapIdx] saddles carrying switchbacks --------
-const PASS_SADDLES = [[0, 1], [0, 3], [1, 1], [1, 3], [2, 1], [3, 1]];
+// East = the pass region (both Eastguard saddles), plus Northwall and the
+// Kanjiro Massif approaches.
+const PASS_SADDLES = [[0, 1], [0, 2], [1, 0], [1, 1], [2, 0], [2, 1]];
 
 // Road hierarchy geometry. Half-widths of the flat bed:
 //   MAIN 3.5 (7 m), PASS 2.5 (5 m); TRAIL (2.5 m) lives in TerrainField.
@@ -187,8 +193,10 @@ export class Landforms {
 
   /** Rider's Meadow mask: 1 at the spawn, 0 beyond the meadow rim. */
   meadowMask(x, z) {
+    // Phase 3.1: wide outer fade (to 1.4 r) — the meadow plane eases into
+    // the surrounding valley over ~500 m, so the rim never reads as a berm.
     const d = Math.hypot(x - MEADOW.x, z - MEADOW.z);
-    return 1 - sstep(MEADOW.r * 0.55, MEADOW.r, d);
+    return 1 - sstep(MEADOW.r * 0.55, MEADOW.r * 1.4, d);
   }
 
   // ---- 4. Mountains (new spine-profile algorithm) ---------------------------
@@ -229,10 +237,13 @@ export class Landforms {
     if (best <= 0) return 0;
     // Alpine texture (multiplicative, never a wall).
     best *= 1 + 0.12 * (vnoise(x * 0.004 + 1.7, z * 0.004 - 2.9, S + 9) - 0.5);
-    // Roads first: the corridor and the meadow push the ranges back.
+    // Roads first: the corridor pushes the ranges back. Phase 3.1: an
+    // OPEN SPAWN BASIN replaces the old tight meadow ring — no massif
+    // contribution within 1 km of Rider's Meadow, full height only
+    // beyond ~1.8 km, so the spawn reads as an open valley with distant
+    // mountains instead of a bowl.
     const sup = (1 - 0.94 * this.corridor(x, z)) *
-      (1 - this.meadowMask(x, z)) *
-      sstep(MEADOW.r, MEADOW.r + 320, Math.hypot(x - MEADOW.x, z - MEADOW.z));
+      sstep(1000, 1800, Math.hypot(x - MEADOW.x, z - MEADOW.z));
     return best * sup;
   }
 
@@ -248,10 +259,14 @@ export class Landforms {
     return PJUMP.h * t * t * w;
   }
 
-  /** Lake bowl depth (subtracted inside the meadow). */
+  /** Combined lake bowl depth (meadow lake + the southern lakes). */
   lakeDepth(x, z) {
-    const d = Math.hypot(x - LAKE.x, z - LAKE.z);
-    return d < LAKE.r ? LAKE.depth * q4(d / LAKE.r) : 0;
+    let h = 0;
+    for (const l of LAKES) {
+      const d = Math.hypot(x - l.x, z - l.z);
+      if (d < l.r) h += l.depth * q4(d / l.r);
+    }
+    return h;
   }
 
   // ---- Roads (laid once at startup) -----------------------------------------
@@ -571,27 +586,30 @@ export class Landforms {
           const E = this._re[i] + (this._re[j] - this._re[i]) * t;
           const hw = this._rw[i];
           const d = Math.sqrt(d2);
+          // Per-segment weight: continuous, 0 at its own fade edge; the
+          // apron widens 3.2x cut/fill depth (shoulders <= ~17 deg).
           const fade = Math.min(ROAD_FADE_MAX, hw * 2.3 + Math.abs(E - h) * 3.2);
           if (d >= fade) continue;
           let w = 1 - sstep(0, fade, d);
           w *= w;
           const bd = 1 - sstep(0, hw * 1.6, d);
-          w *= 1 + 30 * bd * bd;
+          w *= 1 + 220 * bd * bd; // bed dominance: on-bed snaps to its road
           wSum += w; weSum += w * E;
           if (d2 < dMin2) { dMin2 = d2; nearW = hw; nearT = this._rt[i]; }
         }
       }
     }
     if (wSum <= 0) return h;
-    const dMin = Math.sqrt(dMin2);
     const roadE = weSum / wSum;
-    // Blend is a function of the distance to the nearest centerline with
-    // an apron that widens 3.2x the cut/fill depth: shoulders can never
-    // exceed ~1/3.2 = 17 deg. (Never raw weight sums — those saturate
-    // over many nearby segments and cliff at the saturation edge.)
-    const fadeN = Math.min(ROAD_FADE_MAX, nearW * 2.3 + Math.abs(roadE - h) * 3.2);
-    const blend = 1 - sstep(nearW, fadeN, dMin);
+    // SATURATING blend — continuous EVERYWHERE by construction (each
+    // weight is continuous, so their sum is too). On a bed wSum >~ 220
+    // => blend ~ 0.9995; at any fade edge wSum -> 0 => blend -> 0.
+    // (A nearest-eligible-segment pick here is NOT continuous: a wall
+    // forms exactly where the nearest segment crosses its own
+    // depth-dependent eligibility edge.)
+    const blend = wSum / (wSum + 0.12);
     h += (roadE - h) * blend;
+    const dMin = Math.sqrt(dMin2);
     const bed = 1 - sstep(nearW * 0.8, nearW * 1.9, dMin);
     if (bed > L.road) { L.road = bed; L.roadType = nearT; }
     return h;

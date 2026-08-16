@@ -95,20 +95,21 @@ function check(name, ok, detail = '') {
       if (h < minH) minH = h;
       if (h > maxH) maxH = h;
     }
-    // Kanjiro summit area sample.
-    for (let dx = -200; dx <= 200; dx += 25) {
-      for (let dz = -200; dz <= 200; dz += 25) {
-        maxH = Math.max(maxH, f.height(5700 + dx, 350 + dz));
+    // Kanjiro summit area sample (NE massif).
+    for (let dx = -250; dx <= 250; dx += 25) {
+      for (let dz = -250; dz <= 250; dz += 25) {
+        maxH = Math.max(maxH, f.height(7050 + dx, 560 + dz));
       }
     }
     return { deterministic, minH: +minH.toFixed(0), maxH: +maxH.toFixed(0), stats: lf.stats() };
   });
   const st = terrain.stats;
   check('Height is deterministic', terrain.deterministic);
-  check('16 named peaks in 4 connected ranges', st.peaks === 16 && st.ranges === 4);
+  check('10 named peaks in 3 ranges (N / NE / E; S-SW-W open)',
+    st.peaks === 10 && st.ranges === 3);
   check('Highest peak ~2200 m', terrain.maxH > 2000 && terrain.maxH <= 2300, `${terrain.maxH} m`);
-  check('Valley band 100-350 m (no negative holes)',
-    terrain.minH > 90 && terrain.minH < 360, `min=${terrain.minH} m`);
+  check('Valley band 80-250 m (no holes)',
+    terrain.minH > 70 && terrain.minH < 260, `min=${terrain.minH} m`);
   check('Road network: 5 main roads + 6 passes, > 25 km',
     st.mainRoads === 5 && st.passes === 6 && st.roadKm > 25,
     `main=${st.mainKm} km passes=${st.passKm} km total=${st.roadKm} km, vp=${st.viewpoints}`);
@@ -232,6 +233,35 @@ function check(name, ok, detail = '') {
   check('Four-way main road intersection at spawn', meadow.fourWay);
   check('Small lake dug into the meadow', meadow.lakeDip);
 
+  // ================= Phase 3.1: open valley spawn =================
+  const openness = await page.evaluate(() => {
+    const f = window.__game.world.field;
+    const eye = f.height(4000, 1965) + 1.5;
+    let worstNear = -90, visibleFar = 0, nearestSerious = 1e9;
+    for (let a = 0; a < 16; a++) {
+      const th = (a / 16) * Math.PI * 2;
+      let nearAng = -90, farAng = -90;
+      for (let r = 50; r <= 4000; r += 25) {
+        const x = 4000 + Math.cos(th) * r, z = 2000 + Math.sin(th) * r;
+        if (x < 0 || x > 8000 || z < 0 || z > 4000) break;
+        const h = f.height(x, z);
+        const ang = Math.atan2(h - eye, r) * 180 / Math.PI;
+        if (r <= 1000 && ang > nearAng) nearAng = ang;
+        if (r > 2000 && ang > farAng) farAng = ang;
+        if (h > 600 && r < nearestSerious) nearestSerious = r;
+      }
+      if (nearAng > worstNear) worstNear = nearAng;
+      if (farAng > nearAng + 2) visibleFar++;
+    }
+    return { worstNear: +worstNear.toFixed(1), visibleFar, nearestSerious };
+  });
+  check('Spawn is open (no near horizon wall > 6 deg in any direction)',
+    openness.worstNear < 6, `worst near-horizon=${openness.worstNear} deg`);
+  check('Distant mountains visible above the near horizon',
+    openness.visibleFar >= 3, `${openness.visibleFar}/16 bearings`);
+  check('No serious mountain within 1 km of spawn',
+    openness.nearestSerious > 1000, `nearest=${openness.nearestSerious} m`);
+
   // ================= Riding basics =================
   await page.keyboard.down('KeyW');
   await sleep(2200);
@@ -354,9 +384,9 @@ function check(name, ok, detail = '') {
     }
     const loopRide = rideWaypoints(lPts, 60 * 1500);
 
-    // 2. Climb 3 mountain passes (the long flanks: N1-N2, S1-S2, W1-W2).
+    // 2. Climb 3 mountain passes (the long flanks: N1-N2, N2-N3, K0-K1).
     let passesClimbed = 0;
-    for (const pid of [0, 2, 4]) {
+    for (const pid of [0, 1, 2]) {
       const pts = [];
       for (let n = 0; ; n += 2) {
         const pt = lf.passPoint(pid, n);
