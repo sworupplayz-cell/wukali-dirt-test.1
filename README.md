@@ -2,7 +2,7 @@
 
 A lightweight, Android-first, 3D off-road dirt-bike game.
 
-**Current status: Chapter 4 — World foundation.** The world has grown
+**Current status: Chapter 5 — Performance & relief.** The world has grown
 from 32 km2 to 40 km2 (8,000 x 5,000 m, 160 streamed sectors) with five
 distinct regions: Rider's Meadow in the center (spawn, lake, cabins),
 the Glacier Wall in the north (five 1,450-1,800 m peaks), the Volcanic
@@ -20,6 +20,33 @@ The map has no invisible walls: the north is blocked by glacier faces,
 the south by the ocean, the east by volcanic cliffs and the west by
 canyon walls. Bike physics, the original FollowCamera and the streaming
 architecture (SectorWorld / ChunkGrid / ObjectPool) are untouched.
+
+**Chapter 5 (this revision)** is a smoothness-and-depth pass over that
+world — no new landforms, no re-authored roads, no touched physics,
+camera, controls, UI, save data or graphics presets:
+
+- *Terrain sampling is 2.6x cheaper* (measured, and bit-identical: the
+  road corridor mask got a spatial index instead of a 56-segment scan,
+  the corridor/mountain fields are memoized inside a sample, and the
+  nearest-point helper no longer allocates an object per call — it was
+  the engine's biggest garbage source and therefore its GC hitches).
+- *Terrain tiles build in row slices under a frame budget.* A tile is
+  1,225 samples; building one per frame was the drop players felt while
+  riding. The builder now stops when its slice of the frame is spent and
+  resumes next frame, so the worst frame is bounded on any device.
+- *Vegetation and props are amortized too*: plant cells generate
+  candidate-by-candidate under their own budget and wait a few frames
+  behind the terrain fill (they share the same 125 m grid), and prop
+  seating heights are cached instead of re-sampled on every crossing.
+- *Painted relief*: terrain vertices now carry curvature-based ambient
+  occlusion and warm-sun / cool-sky directional paint, and the far
+  backdrop is shaded identically so the LOD handover no longer steps in
+  tone. Cloud shadows and a colour push run in the shared palette.
+- *Roads read hand-made*: three-scale organic bed edges, dusty and damp
+  stretches, and grass creeping back over quiet shoulders.
+- *A fuller world*: a clustered ground-detail scatter (stones, scree,
+  spires — existing instanced models, zero extra draw calls) fills the
+  space between landmarks.
 
 ## Tech
 

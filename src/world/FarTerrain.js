@@ -22,6 +22,25 @@ const STEP = 62.5; // 160x80 world grid (exact binary) — ~25 k triangles total
 const W = 8000, H = 5000;
 const CHUNKS_X = 2, CHUNKS_Z = 2;
 const DISCARD_NEAR = 330; // near tile window worst-case covers 375 m
+// Sun rig direction (matches SectorWorld + TerrainTiles).
+const SUN_X = 0.632, SUN_Y = 0.677, SUN_Z = 0.361;
+
+/** Near-tile-matching relief shading, applied to a finished backdrop chunk. */
+function shadeVertices(geo) {
+  const col = geo.attributes.color.array;
+  const nor = geo.attributes.normal.array;
+  for (let v = 0; v < col.length; v += 3) {
+    const nx = nor[v], ny = nor[v + 1], nz = nor[v + 2];
+    const lit = nx * SUN_X + ny * SUN_Y + nz * SUN_Z - SUN_Y;
+    const shade = 0.82 + 0.18 * ny;
+    let r = col[v] * shade, g = col[v + 1] * shade, b = col[v + 2] * shade;
+    if (lit > 0) { r += lit * 0.11; g += lit * 0.07; b -= lit * 0.035; }
+    else { r += lit * 0.05; g += lit * 0.02; b -= lit * 0.075; }
+    col[v] = r < 0 ? 0 : r;
+    col[v + 1] = g < 0 ? 0 : g;
+    col[v + 2] = b < 0 ? 0 : b;
+  }
+}
 
 export class FarTerrain {
   constructor(scene, field) {
@@ -79,6 +98,12 @@ export class FarTerrain {
         geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
         geo.setIndex(idx);
         geo.computeVertexNormals();
+        // Chapter 5: apply the SAME relief shading the near tiles use
+        // (slope darkening + warm sun / cool sky directional paint). The
+        // backdrop used to be lit by Lambert alone, so a mountain flank
+        // changed tone the moment a streamed tile took over from it —
+        // that tone step is what read as terrain popping at range.
+        shadeVertices(geo);
         geo.computeBoundingSphere();
         const mesh = new THREE.Mesh(geo, mat);
         mesh.matrixAutoUpdate = false;

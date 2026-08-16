@@ -17,6 +17,8 @@ import { hash01, mulberry32, hashInt } from './noise.js';
  *   - per-sector scatter (4-6 candidates): signposts & resting spots on
  *     roads/trails, cabins on gentle foothill meadows, cave entrances on
  *     steep massif flanks, rock formations anywhere open
+ *   - Chapter 5 ground-detail scatter: clustered stones, scree patches
+ *     and spires between the landmarks (existing models, no new draws)
  *
  * Cabins, rocks and lookout piers get collision circles (the bike's
  * existing prop-collider system); flags/signs/rest spots are ride-through.
@@ -30,7 +32,10 @@ const FOOT = { flags: 2.2, sign: 0.4, lookout: 1.7, cabin: 1.9, cave: 1.8,
 const CAP = { flags: 48, sign: 48, lookout: 24, cabin: 32, cave: 24,
   rest: 48, bench: 32, bridge: 16, arch: 8, fence: 96, marker: 64,
   // Chapter 3B: 5 reusable rock models (sizes/colors), instanced.
-  rocks: 40, boulder: 28, slab: 28, spire: 20, scree: 40 };
+  // Chapter 5: raised for the clustered ground-detail scatter — instance
+  // capacity is a few hundred bytes of matrix each, and the draw-call
+  // count does not move (still one InstancedMesh per model).
+  rocks: 96, boulder: 64, slab: 56, spire: 32, scree: 128 };
 
 export class Props {
   constructor(scene, field) {
@@ -212,6 +217,52 @@ export class Props {
       }
     }
 
+    // Chapter 5 — GROUND DETAIL scatter. The world felt empty because
+    // everything placed so far is a landmark: one object every 300-500 m
+    // with nothing in between. This second pass fills the space with the
+    // small stuff real terrain is covered in — stone groups, gravel
+    // patches, the odd spire — reusing the EXISTING instanced rock
+    // models, so it costs zero extra draw calls. Everything is placed in
+    // CLUSTERS (a big stone with two or three smaller companions), which
+    // is what makes scatter read as natural rather than sprinkled.
+    for (let i = 0; i < 9; i++) {
+      const px = ox + 25 + rng() * 450, pz = oz + 25 + rng() * 450;
+      field.sample(px, pz, info);
+      const yaw = rng() * 6.28;
+      const r = rng();
+      if (info.h < 58) continue;           // beach and seabed stay clean
+      if (info.trail > 0.25) continue;     // never on a road bed
+      if (lf.roadDist(px, pz) < 6.5) continue;
+      const e = 5;
+      const sl = Math.hypot(
+        field.height(px + e, pz) - field.height(px - e, pz),
+        field.height(px, pz + e) - field.height(px, pz - e)
+      ) / (2 * e);
+      if (sl > 0.62) continue;             // sheer faces keep clean lines
+      let t;
+      if (info.mtn > 0.45) {
+        // Alpine: shattered rock, scree fans, the occasional spire.
+        t = r < 0.42 ? 'scree' : r < 0.72 ? 'rocks' : r < 0.9 ? 'slab' : 'spire';
+      } else if (sl > 0.22) {
+        t = r < 0.5 ? 'rocks' : r < 0.8 ? 'boulder' : 'scree';
+      } else {
+        t = r < 0.45 ? 'rocks' : r < 0.7 ? 'boulder' : r < 0.85 ? 'scree' : 'slab';
+      }
+      const s0 = 0.5 + rng() * 0.55;
+      list.push({ t, x: px, z: pz, y: field.height(px, pz), yaw, s: s0 });
+      const n = rng() < 0.55 ? 2 : 1;
+      for (let k = 0; k < n; k++) {
+        const a = rng() * 6.28, d = 2.4 + rng() * 4.6;
+        const qx = px + Math.cos(a) * d, qz = pz + Math.sin(a) * d;
+        if (lf.roadDist(qx, qz) < 6) continue;
+        list.push({
+          t: rng() < 0.45 ? 'scree' : t,
+          x: qx, z: qz, y: field.height(qx, qz),
+          yaw: rng() * 6.28, s: s0 * (0.42 + rng() * 0.38),
+        });
+      }
+    }
+
     if (this._sectorCache.size > 60) this._sectorCache.clear(); // bound memory
     this._sectorCache.set(key, list);
     return list;
@@ -245,7 +296,12 @@ export class Props {
         const t = this.types[p.t];
         const n = counts[p.t];
         if (n >= t.max) continue;
-        this._p.set(p.x, this._groundY(p), p.z);
+        // Chapter 5: seat height is a pure function of the prop, so cache
+        // it on the record — the window rebuild used to re-sample the
+        // terrain five times per prop (about 1,400 height queries) every
+        // time the player crossed a sector line.
+        if (p.gy === undefined) p.gy = this._groundY(p);
+        this._p.set(p.x, p.gy, p.z);
         this._e.set(0, p.yaw, 0);
         this._q.setFromEuler(this._e);
         this._s.setScalar(p.s);

@@ -31,6 +31,11 @@ import { hash01, mulberry32, hashInt, sstep, vnoise } from './noise.js';
 const CELL = 125;
 const NEAR_R = 2;   // 5x5 cells full detail  (~312 m)
 const FAR_R = 4;    // 9x9 cells impostors    (~562 m)
+const CKEY = 65536;        // integer cell-cache key stride
+const CELL_BUDGET_MS = 0.8; // Chapter 5: per-frame plant-generation budget
+const VEG_STAGGER = 5;      // frames to wait behind the terrain tile fill
+const nowMs = typeof performance !== 'undefined' && performance.now
+  ? () => performance.now() : () => Date.now();
 
 // Per-type instance capacities (near / far pools).
 const TYPES = ['pine', 'fir', 'birch', 'oak', 'dead', 'bush', 'fern', 'grass', 'flower', 'shrub'];
@@ -89,7 +94,7 @@ export class Vegetation {
     if (density === this._density && farR === this._farR) return;
     this._density = density;
     this._farR = Math.max(NEAR_R, Math.min(FAR_R, farR));
-    if (this._pcx !== null) this._rebuild(this._pcx, this._pcz);
+    if (this._pcx !== null) this._rebuild(this._pcx, this._pcz, Infinity);
   }
 
   /** Per-frame: rebuild instance lists when the player crosses a cell;
@@ -98,8 +103,31 @@ export class Vegetation {
   update(px, pz) {
     const cx = Math.floor(px / CELL), cz = Math.floor(pz / CELL);
     if (cx !== this._pcx || cz !== this._pcz) {
+      // Chapter 5: a boundary crossing used to price ~17 brand-new cell
+      // lists (each one terrain-samples ~35 candidates) into ONE frame —
+      // a 10-20 ms stall on a phone, right in the middle of riding. The
+      // window now fills under a time budget over as many frames as it
+      // needs; plants that are not placed yet simply grow in a frame or
+      // two later, which the LOD grow-in animation already covers.
+      // A TELEPORT (or the first fill) still completes immediately: the
+      // screen is behind the loading overlay or the player just moved
+      // somewhere entirely new, so nothing must be missing.
+      const jump = this._pcx === null ? 99
+        : Math.max(Math.abs(cx - this._pcx), Math.abs(cz - this._pcz));
       this._pcx = cx; this._pcz = cz;
-      this._rebuild(cx, cz);
+      if (jump > 1) {
+        this._rebuild(cx, cz, Infinity);
+      } else {
+        // Terrain tiles use the SAME 125 m grid, so a crossing used to
+        // bill new tiles AND new plants to one frame. Plants wait a few
+        // frames for the tile ring to finish first — invisible (the LOD
+        // grow-in already fades them in) and it halves the worst frame.
+        this._pending = true;
+        this._delay = VEG_STAGGER;
+      }
+    } else if (this._pending) {
+      if (this._delay > 0) this._delay--;
+      else this._rebuild(cx, cz, CELL_BUDGET_MS);
     }
     if (this._growing && this._growing.length > 0) this._stepGrow();
   }
@@ -125,79 +153,136 @@ export class Vegetation {
     this._growing.length = write;
   }
 
-  /** Deterministic plant list for one 125 m cell. */
-  _cellPlants(cx, cz) {
-    const key = `${cx},${cz}`;
-    let list = this._cellCache.get(key);
-    if (list) return list;
-    list = [];
-    const f = this.field;
-    const lf = f.landforms;
-    const rng = mulberry32(hashInt(cx, cz, 0x7e93));
-    const info = this._info;
-    const ox = cx * CELL, oz = cz * CELL;
+  /** Cached plant list for one 125 m cell, or null when it has not been
+   *  generated yet and `build` is false (the amortized window fill). */
+  _cellPlants(cx, cz, build = true) {
+    const hit = this._cellCache.get(cx * CKEY + cz);
+    if (hit) return hit;
+    if (!build) return null;
+    const job = this._startCell(cx, cz);
+    while (!this._stepCell(job)) { /* generate the whole cell now */ }
+    return this._cacheCell(job);
+  }
 
+  /**
+   * Chapter 5: cell generation is RESUMABLE at candidate granularity.
+   * One dense forest cell is ~24 candidates and every candidate costs a
+   * terrain sample, a road-distance query and several height probes — on
+   * a phone that is several milliseconds, i.e. a visible hitch if it all
+   * lands on one frame. `_advanceCell` does as many candidates as the
+   * frame budget allows and remembers where it stopped.
+   */
+  _startCell(cx, cz) {
     // Forest density field: patchy woods, not uniform speckle.
     const forest = vnoise(cx * 0.17 + 3.7, cz * 0.17 - 8.1, 4441);
     const nTrees = forest > 0.38 ? (3 + (forest - 0.38) * 26) | 0 : 0;
     const nGround = 5;
-
-    for (let i = 0; i < nTrees + nGround; i++) {
-      const x = ox + 6 + rng() * (CELL - 12), z = oz + 6 + rng() * (CELL - 12);
-      if (x < 30 || x > 7970 || z < 30 || z > 4970) continue;
-      f.sample(x, z, info);
-      const h = info.h;
-      if (h < 55) continue; // no vegetation on the beach / under the sea
-      // Keep clear of roads/trails and the groomed meadow core, and the lake.
-      if (info.trail > 0.02) continue;
-      if (lf.roadDist(x, z) < 11) continue;
-      const dMeadow = Math.hypot(x - 4000, z - 2500);
-      if (dMeadow < 240) continue;
-      // Slope: no trees on cliffs.
-      const e = 5;
-      const sl = Math.hypot(f.height(x + e, z) - f.height(x - e, z),
-        f.height(x, z + e) - f.height(x, z - e)) / (2 * e);
-      if (sl > 0.55) continue;
-      const r = rng(), rr = rng();
-      const isTree = i < nTrees;
-      let t = null, s = 1;
-      if (isTree) {
-        if (h > 1500) continue; // above the tree line
-        if (h > 320) {
-          // Foothill conifer belt.
-          t = h > 1100 && r < 0.3 ? 'dead' : r < 0.55 ? 'pine' : 'fir';
-        } else {
-          // Lowland broadleaf.
-          t = r < 0.4 ? 'birch' : r < 0.7 ? 'oak' : rr < 0.5 ? 'pine' : 'bush';
-        }
-        if (info.moist < 0.25 && rr < 0.35) t = 'dead';
-        s = 1.15 + rng() * 0.75;
-      } else {
-        if (h > 1300 || sl > 0.4) continue;
-        // Ground cover: grass/flowers in the open, ferns/shrubs in woods.
-        if (forest > 0.5) t = r < 0.5 ? 'fern' : r < 0.8 ? 'bush' : 'shrub';
-        else t = r < 0.5 ? 'grass' : r < 0.75 ? 'flower' : 'shrub';
-        s = 0.75 + rng() * 0.5;
-      }
-      if (!t) continue;
-      // Seat on the LOWEST nearby ground so trunks never float on slopes
-      // (the models sink a few cm into the hill instead).
-      const rF = isTree ? 0.9 : 0.5;
-      const y = Math.min(h,
-        f.height(x + rF, z), f.height(x - rF, z),
-        f.height(x, z + rF), f.height(x, z - rF)) - 0.06 * s;
-      list.push({ t, x, z, y, yaw: rng() * 6.283, s, tree: isTree });
-    }
-
-    if (this._cellCache.size > 300) this._cellCache.clear();
-    this._cellCache.set(key, list);
-    return list;
+    return {
+      cx, cz, key: cx * CKEY + cz,
+      ox: cx * CELL, oz: cz * CELL,
+      rng: mulberry32(hashInt(cx, cz, 0x7e93)),
+      forest, nTrees, total: nTrees + nGround,
+      i: 0, list: [],
+    };
   }
 
-  _rebuild(cx, cz) {
+  /** Evaluate ONE placement candidate. Returns true when the cell is done. */
+  _stepCell(job) {
+    const f = this.field;
+    const lf = f.landforms;
+    const info = this._info;
+    const rng = job.rng;
+    const { ox, oz, forest, nTrees } = job;
+    const i = job.i++;
+    const x = ox + 6 + rng() * (CELL - 12), z = oz + 6 + rng() * (CELL - 12);
+    if (x >= 30 && x <= 7970 && z >= 30 && z <= 4970) {
+      f.sample(x, z, info);
+      const h = info.h;
+      // No vegetation on the beach / under the sea; keep clear of
+      // roads/trails, the groomed meadow core and the lake.
+      const dMeadow = Math.hypot(x - 4000, z - 2500);
+      if (h >= 55 && info.trail <= 0.02 && dMeadow >= 240 && lf.roadDist(x, z) >= 11) {
+        // Slope: no trees on cliffs.
+        const e = 5;
+        const sl = Math.hypot(f.height(x + e, z) - f.height(x - e, z),
+          f.height(x, z + e) - f.height(x, z - e)) / (2 * e);
+        if (sl <= 0.55) {
+          const r = rng(), rr = rng();
+          const isTree = i < nTrees;
+          let t = null, s = 1, ok = true;
+          if (isTree) {
+            if (h > 1500) ok = false; // above the tree line
+            else {
+              if (h > 320) {
+                // Foothill conifer belt.
+                t = h > 1100 && r < 0.3 ? 'dead' : r < 0.55 ? 'pine' : 'fir';
+              } else {
+                // Lowland broadleaf.
+                t = r < 0.4 ? 'birch' : r < 0.7 ? 'oak' : rr < 0.5 ? 'pine' : 'bush';
+              }
+              if (info.moist < 0.25 && rr < 0.35) t = 'dead';
+              s = 1.15 + rng() * 0.75;
+            }
+          } else if (h > 1300 || sl > 0.4) {
+            ok = false;
+          } else {
+            // Ground cover: grass/flowers in the open, ferns/shrubs in woods.
+            if (forest > 0.5) t = r < 0.5 ? 'fern' : r < 0.8 ? 'bush' : 'shrub';
+            else t = r < 0.5 ? 'grass' : r < 0.75 ? 'flower' : 'shrub';
+            s = 0.75 + rng() * 0.5;
+          }
+          if (ok && t) {
+            // Seat on the LOWEST nearby ground so trunks never float on
+            // slopes (the models sink a few cm into the hill instead).
+            const rF = isTree ? 0.9 : 0.5;
+            const y = Math.min(h,
+              f.height(x + rF, z), f.height(x - rF, z),
+              f.height(x, z + rF), f.height(x, z - rF)) - 0.06 * s;
+            job.list.push({ t, x, z, y, yaw: rng() * 6.283, s, tree: isTree });
+          }
+        }
+      }
+    }
+    return job.i >= job.total;
+  }
+
+  /** Store a finished cell job in the LRU cache and return its list. */
+  _cacheCell(job) {
+    // LRU-ish bound: drop the OLDEST entries instead of wiping the whole
+    // cache (a full clear meant every cell around the player had to be
+    // regenerated on the very next crossing).
+    if (this._cellCache.size > 420) {
+      let drop = 80;
+      for (const k of this._cellCache.keys()) {
+        this._cellCache.delete(k);
+        if (--drop <= 0) break;
+      }
+    }
+    this._cellCache.set(job.key, job.list);
+    return job.list;
+  }
+
+  /** Resume or start one cell under the frame budget; null if unfinished. */
+  _advanceCell(cx, cz, budgetMs, t0) {
+    let job = this._job;
+    if (!job || job.cx !== cx || job.cz !== cz) {
+      if (nowMs() - t0 >= budgetMs) return null;
+      job = this._job = this._startCell(cx, cz);
+    }
+    while (!this._stepCell(job)) {
+      if (nowMs() - t0 >= budgetMs) return null;
+    }
+    this._job = null;
+    return this._cacheCell(job);
+  }
+
+  _rebuild(cx, cz, budgetMs = Infinity) {
     // Track which near cells are NEW this rebuild: their trees grow in.
     const prevCells = this._nearCells || new Set();
     const nowCells = new Set();
+    const t0 = budgetMs === Infinity ? 0 : nowMs();
+    if (budgetMs === Infinity) this._job = null; // drop any partial job
+    let pending = false;
     if (!this._growing) this._growing = [];
     const nearCounts = {}, farCounts = {};
     for (const t of TYPES) nearCounts[t] = 0;
@@ -210,10 +295,18 @@ export class Vegetation {
     for (let dz = -R; dz <= R; dz++) {
       for (let dx = -R; dx <= R; dx++) {
         const nearRing = Math.max(Math.abs(dx), Math.abs(dz)) <= NEAR_R;
-        const cellKey = (cx + dx) + ',' + (cz + dz);
+        const cellKey = (cx + dx) * CKEY + (cz + dz);
         const isNewNear = nearRing && !prevCells.has(cellKey) && prevCells.size > 0;
+        // Generate this cell's plant list only while inside the frame
+        // budget; skipped cells are picked up on following frames.
+        let plants = this._cellPlants(cx + dx, cz + dz, false);
+        if (!plants) {
+          plants = budgetMs === Infinity
+            ? this._cellPlants(cx + dx, cz + dz, true)
+            : this._advanceCell(cx + dx, cz + dz, budgetMs, t0);
+          if (!plants) { pending = true; continue; }
+        }
         if (nearRing) nowCells.add(cellKey);
-        const plants = this._cellPlants(cx + dx, cz + dz);
         for (let pi = 0; pi < plants.length; pi++) {
           const p = plants[pi];
           // Density thinning: deterministic per-plant keep test.
@@ -241,6 +334,7 @@ export class Vegetation {
         }
       }
     }
+    this._pending = pending;
     let vn = 0, vf = 0;
     for (const t of TYPES) {
       this._near[t].count = nearCounts[t];

@@ -13,6 +13,13 @@ import { sstep, vnoise } from './noise.js';
  *   - rock color variation: banding on the alpine faces
  *   - slight ambient vertex tint: large-scale warm/cool wash
  *
+ * Chapter 5 additions (still pure functions of world position, so both
+ * LOD levels stay in lockstep):
+ *   - cloud shadows: soft 700 m cool patches across the whole map
+ *   - colour push: saturation lifted away from local luminance
+ *   - roads: three-scale organic edge, dusty/damp stretches, grass
+ *     creeping back over quiet shoulders
+ *
  * Bands: moist grass -> dry scrub -> alpine rock -> snow, with the dirt
  * road tint applied last so roads stay readable at any altitude.
  */
@@ -58,8 +65,16 @@ export function colorFor(info, out, x = 0, z = 0) {
   // Dirt road/trail tint with a noise-broken soft edge, worn tire paths,
   // gravel shoulders and scattered small stones (Chapter 3B road wear).
   if (t > 0.003) {
+    // Chapter 5 — organic edges. A single 9 m noise octave gave every
+    // road the same fuzzy-but-uniform rim, which is what read as
+    // "artificial". Three scales now break the bed line: a long 60 m
+    // meander (the road wanders inside its own corridor), a 9 m ragged
+    // fringe and a 2 m crumble, all applied only near the edge (t small)
+    // so the bed you actually ride stays exactly where physics put it.
+    const meander = (vnoise(x * 0.017 + 41.3, z * 0.017 - 22.7, 918) - 0.5) * 1.15;
     const edge = (vnoise(x * 0.11, z * 0.11, 919) - 0.5) * 0.5;
-    t = Math.min(1, Math.max(0, t + edge * (1 - t) * t * 4));
+    const crumble = (vnoise(x * 0.42 - 5.1, z * 0.42 + 3.3, 921) - 0.5) * 0.35;
+    t = Math.min(1, Math.max(0, t + (meander + edge + crumble) * (1 - t) * t * 4));
     const tr = t * (1 - 0.35 * snow);
     // Base dirt bed.
     let dr = 0.55 + patch * 0.04, dg = 0.435, db = 0.285;
@@ -82,9 +97,25 @@ export function colorFor(info, out, x = 0, z = 0) {
       const sv = (stone - 0.78) * 2.4;
       dr += sv * 0.14; dg += sv * 0.13; db += sv * 0.12;
     }
-    r += (dr - r) * tr;
-    g += (dg - g) * tr;
-    b += (db - b) * tr;
+    // Chapter 5 road wear: long dusty stretches and damp/mud patches,
+    // and grass creeping back over the shoulders of quiet roads. No two
+    // 50 m stretches of dirt look alike any more.
+    const wear = vnoise(x * 0.021 - 13.9, z * 0.021 + 27.4, 933);
+    if (wear > 0.62) {
+      const dusty = (wear - 0.62) * 2.2; // sun-bleached, blown dust
+      dr += dusty * 0.10; dg += dusty * 0.085; db += dusty * 0.06;
+    } else if (wear < 0.34) {
+      const damp = (0.34 - wear) * 2.0;  // packed damp earth, darker
+      dr -= damp * 0.11; dg -= damp * 0.095; db -= damp * 0.06;
+    }
+    // Grass encroachment: patches where the verge has taken the bed
+    // back — the mask itself is softened, not just tinted.
+    const creep = vnoise(x * 0.055 + 8.8, z * 0.055 - 4.4, 935);
+    const enc = creep > 0.66 ? (creep - 0.66) * 2.6 : 0;
+    const trf = tr * (1 - 0.55 * enc * (1 - sstep(0.55, 0.9, t)));
+    r += (dr - r) * trf;
+    g += (dg - g) * trf;
+    b += (db - b) * trf;
   }
 
   // Chapter 4 region tints (after the altitude bands, before the wash).
@@ -115,6 +146,28 @@ export function colorFor(info, out, x = 0, z = 0) {
   g += wash * 0.015;
   b -= wash * 0.03;
 
-  out[0] = r; out[1] = g; out[2] = b;
+  // Chapter 5 — CLOUD SHADOWS. Soft 700 m patches of cooler, darker
+  // ground drifting across the whole map (static in world space, so the
+  // near tiles and the far backdrop agree exactly and nothing shimmers).
+  // Big scenery reads flat when every hillside gets identical light;
+  // this is the single cheapest way to give the world depth at range.
+  const cloud = vnoise(x * 0.0014 - 6.3, z * 0.0014 + 11.7, 947);
+  if (cloud < 0.46) {
+    const sh = (0.46 - cloud) * 2.0;      // 0..~0.9
+    const k = 1 - 0.13 * sh;
+    r *= k; g *= k * 1.004; b *= k * 1.03; // shadows go blue, not grey
+  }
+
+  // Chapter 5 — depth of colour. Low-poly ground looks flat when every
+  // channel sits in the same narrow band, so push saturation away from
+  // the local luminance a touch (a painter's "push the colour" pass).
+  const lum = r * 0.35 + g * 0.5 + b * 0.15;
+  r += (r - lum) * 0.16;
+  g += (g - lum) * 0.16;
+  b += (b - lum) * 0.16;
+
+  out[0] = r < 0 ? 0 : r;
+  out[1] = g < 0 ? 0 : g;
+  out[2] = b < 0 ? 0 : b;
   return out;
 }

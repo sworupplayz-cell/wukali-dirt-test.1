@@ -8,6 +8,9 @@
  *
  * Not wired into any update loop; it costs nothing until used.
  */
+const KEY = 65536;   // cell-key stride
+const HALF = KEY / 2; // decode window for negative cz
+
 export class ChunkGrid {
   /**
    * @param {number} cellSize world-units per cell
@@ -16,9 +19,19 @@ export class ChunkGrid {
   constructor(cellSize, radius) {
     this.cellSize = cellSize;
     this.radius = radius;
-    this.cells = new Map(); // "cx,cz" -> user data (or true)
+    // Chapter 5: INTEGER cell keys (cx * KEY + cz) instead of "cx,cz"
+    // strings. A window refresh used to build ~121 template strings and
+    // then parse them back with split(',').map(Number) — pure garbage on
+    // exactly the frame the player crosses a boundary, i.e. exactly when
+    // the frame budget is already paying for new tiles.
+    this.cells = new Map(); // key(cx,cz) -> user data (or true)
     this._fx = null;
     this._fz = null;
+  }
+
+  /** Integer key for a cell (shared by every user of the grid). */
+  static key(cx, cz) {
+    return cx * KEY + cz;
   }
 
   /**
@@ -34,7 +47,8 @@ export class ChunkGrid {
     this._fz = cz;
 
     for (const [k, data] of this.cells) {
-      const [ax, az] = k.split(',').map(Number);
+      const az = ((k % KEY) + KEY + HALF) % KEY - HALF;
+      const ax = Math.round((k - az) / KEY);
       if (Math.max(Math.abs(ax - cx), Math.abs(az - cz)) > this.radius) {
         this.cells.delete(k);
         if (onLeave) onLeave(ax, az, data);
@@ -42,7 +56,7 @@ export class ChunkGrid {
     }
     for (let dx = -this.radius; dx <= this.radius; dx++) {
       for (let dz = -this.radius; dz <= this.radius; dz++) {
-        const k = `${cx + dx},${cz + dz}`;
+        const k = (cx + dx) * KEY + (cz + dz);
         if (!this.cells.has(k)) {
           const data = onEnter ? onEnter(cx + dx, cz + dz) : true;
           this.cells.set(k, data === undefined ? true : data);
@@ -55,8 +69,8 @@ export class ChunkGrid {
   clear(onLeave) {
     if (onLeave) {
       for (const [k, data] of this.cells) {
-        const [ax, az] = k.split(',').map(Number);
-        onLeave(ax, az, data);
+        const az = ((k % KEY) + KEY + HALF) % KEY - HALF;
+        onLeave(Math.round((k - az) / KEY), az, data);
       }
     }
     this.cells.clear();

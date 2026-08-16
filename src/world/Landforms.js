@@ -195,6 +195,12 @@ const ROAD_FADE_MAX = 185; // deep Chapter 4 bench cuts stay <= 18 deg aprons
 const PASS_WAVE = 560; // longer traverses on the wide Chapter 4 pedestals
 const RD_STEP = 16;
 const RD_CELL = 128;
+// Chapter 5: corridor-segment index grid (see _buildCorridorIndex) and the
+// integer cell-key stride shared by both spatial hashes (numeric keys —
+// the old `${cx},${cz}` template strings allocated 9 strings per sample).
+const CORR_CELL = 256;
+const CORR_KEY = 4096;
+const RD_KEY = 65536;
 
 // Practice jump on the South Arm, 140 m from the spawn intersection.
 const PJUMP = { x: 4000, z: 2640, h: 1.5, l: 8, w: 6 };
@@ -214,6 +220,19 @@ export class Landforms {
     this.mainRoads = [];  // filled by initRoads()
     this.viewpoints = []; // filled by initViewpoints()
     this.roadKm = 0;
+
+    // Chapter 5 sampling acceleration (RESULTS ARE BIT-IDENTICAL — this
+    // is pure bookkeeping, the world is not changed by one millimetre):
+    //   * corridor() used to test all 56 main-route segments per sample;
+    //     it now tests only the segments bucketed into the query cell.
+    //   * corridor()/mountains() get a one-slot memo because one
+    //     TerrainField.sample() asks for each of them 2-3 times at the
+    //     very same (x, z) (base composition + the mountain factor).
+    // Terrain sampling is the frame loop's single biggest cost (a tile
+    // build is 1,225 samples), so this is where riding hitches come from.
+    this._buildCorridorIndex();
+    this._cmX = NaN; this._cmZ = NaN; this._cmV = 0; // corridor memo
+    this._mmX = NaN; this._mmZ = NaN; this._mmV = 0; // mountains memo
 
     // Rider's Meadow fixtures (rendered by Props with the spawn sector).
     this.meadowFixtures = [
@@ -254,24 +273,70 @@ export class Landforms {
    * run through wide gentle valleys — roads first, scenery second.
    */
   corridor(x, z) {
+    // Chapter 5: one-slot memo — TerrainField asks for the corridor two
+    // to three times at the same (x, z) per sample (base band, mountain
+    // suppression, mountain factor).
+    if (x === this._cmX && z === this._cmZ) return this._cmV;
     let m = 0;
+    // Chapter 4: per-route corridor strength/width. The Eagle Approach
+    // carves only a narrow partial notch (str 0.82, w 320) — it climbs
+    // THROUGH the massif rather than flattening it.
+    // Chapter 5: only the segments bucketed into this cell can reach the
+    // point (every segment is registered in every cell its corridor-width
+    // bbox touches), so the result is identical to the old full scan.
+    const arr = this._corrHash.get(
+      Math.floor(x / CORR_CELL) * CORR_KEY + Math.floor(z / CORR_CELL));
+    if (arr) {
+      const sn = _SN;
+      for (let k = 0; k < arr.length; k++) {
+        const i = arr[k];
+        const cw = this._csW[i];
+        segNearest(x, z, this._csAx[i], this._csAz[i], this._csBx[i], this._csBz[i]);
+        if (sn.d2 < cw * cw) {
+          const v = (1 - sstep(cw * 0.27, cw, Math.sqrt(sn.d2))) * this._csStr[i];
+          if (v > m) m = v;
+          if (m >= 1) { m = 1; break; }
+        }
+      }
+    }
+    this._cmX = x; this._cmZ = z; this._cmV = m;
+    return m;
+  }
+
+  /**
+   * Bucket every main-route segment into a uniform grid, dilated by its
+   * own corridor width, so corridor() can look up candidates in O(1).
+   * Built once at construction; ~1,700 index entries.
+   */
+  _buildCorridorIndex() {
+    this._csAx = []; this._csAz = []; this._csBx = []; this._csBz = [];
+    this._csStr = []; this._csW = [];
+    this._corrHash = new Map();
     for (const route of MAIN_ROUTES) {
-      // Chapter 4: per-route corridor strength/width. The Eagle Approach
-      // carves only a narrow partial notch (str 0.55, w 140) — it climbs
-      // THROUGH the massif rather than flattening it.
       const str = route.corrStr ?? 1;
       const cw = route.corrW ?? 450;
       const pts = route.pts;
       for (let i = 0; i < pts.length - 1; i++) {
-        const r = segNearest(x, z, pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]);
-        if (r.d2 < cw * cw) {
-          const v = (1 - sstep(cw * 0.27, cw, Math.sqrt(r.d2))) * str;
-          if (v > m) m = v;
-          if (m >= 1) return 1;
+        const ax = pts[i][0], az = pts[i][1];
+        const bx = pts[i + 1][0], bz = pts[i + 1][1];
+        const idx = this._csAx.length;
+        this._csAx.push(ax); this._csAz.push(az);
+        this._csBx.push(bx); this._csBz.push(bz);
+        this._csStr.push(str); this._csW.push(cw);
+        const cx0 = Math.floor((Math.min(ax, bx) - cw) / CORR_CELL);
+        const cx1 = Math.floor((Math.max(ax, bx) + cw) / CORR_CELL);
+        const cz0 = Math.floor((Math.min(az, bz) - cw) / CORR_CELL);
+        const cz1 = Math.floor((Math.max(az, bz) + cw) / CORR_CELL);
+        for (let cz = cz0; cz <= cz1; cz++) {
+          for (let cx = cx0; cx <= cx1; cx++) {
+            const key = cx * CORR_KEY + cz;
+            let a = this._corrHash.get(key);
+            if (!a) this._corrHash.set(key, (a = []));
+            a.push(idx);
+          }
         }
       }
     }
-    return m;
   }
 
   /** Rider's Meadow mask: 1 at the spawn, 0 beyond the meadow rim. */
@@ -291,6 +356,9 @@ export class Landforms {
    * and the meadow — mountains never swallow a road.
    */
   mountains(x, z) {
+    // Chapter 5: one-slot memo (sample() composes the base height and
+    // then asks for the mountain factor at the identical coordinate).
+    if (x === this._mmX && z === this._mmZ) return this._mmV;
     // Domain warp (~90 m) breaks up the analytic spine silhouette.
     const wx = x + 180 * (vnoise(x * 0.0011 + 3.1, z * 0.0011 - 7.7, S + 3) - 0.5);
     const wz = z + 180 * (vnoise(x * 0.0011 - 9.2, z * 0.0011 + 4.4, S + 5) - 0.5);
@@ -301,8 +369,8 @@ export class Landforms {
       let d2 = Infinity, gi = 0, gu = 0;
       for (let i = 0; i < r.nodes.length - 1; i++) {
         const a = r.nodes[i], b = r.nodes[i + 1];
-        const s2 = segNearest(wx, wz, a[0], a[1], b[0], b[1]);
-        if (s2.d2 < d2) { d2 = s2.d2; gi = i; gu = s2.t; }
+        segNearest(wx, wz, a[0], a[1], b[0], b[1]);
+        if (_SN.d2 < d2) { d2 = _SN.d2; gi = i; gu = _SN.t; }
       }
       const a = r.nodes[gi], b = r.nodes[gi + 1];
       const fs = gu * gu * (3 - 2 * gu);
@@ -317,7 +385,7 @@ export class Landforms {
       }
       if (h > best) best = h;
     }
-    if (best <= 0) return 0;
+    if (best <= 0) { this._mmX = x; this._mmZ = z; this._mmV = 0; return 0; }
     // Alpine texture (multiplicative, never a wall).
     best *= 1 + 0.12 * (vnoise(x * 0.004 + 1.7, z * 0.004 - 2.9, S + 9) - 0.5);
     // Roads first: the corridor pushes the ranges back. Phase 3.1: an
@@ -327,7 +395,9 @@ export class Landforms {
     // mountains instead of a bowl.
     const sup = (1 - 0.94 * this.corridor(x, z)) *
       sstep(1000, 1800, Math.hypot(x - MEADOW.x, z - MEADOW.z));
-    return best * sup;
+    const out = best * sup;
+    this._mmX = x; this._mmZ = z; this._mmV = out;
+    return out;
   }
 
   /**
@@ -506,7 +576,7 @@ export class Landforms {
     let bi = -1, bd2 = 30 * 30;
     for (let dz = -1; dz <= 1; dz++) {
       for (let dx = -1; dx <= 1; dx++) {
-        const arr = this._hash.get(`${cx + dx},${cz + dz}`);
+        const arr = this._hash.get((cx + dx) * RD_KEY + (cz + dz));
         if (!arr) continue;
         for (let k = 0; k < arr.length; k++) {
           const i = arr[k];
@@ -698,7 +768,7 @@ export class Landforms {
     const cur = this._rx.length - 1;
     for (let dz = -1; dz <= 1; dz++) {
       for (let dx = -1; dx <= 1; dx++) {
-        const arr = this._hash.get(`${cx + dx},${cz + dz}`);
+        const arr = this._hash.get((cx + dx) * RD_KEY + (cz + dz));
         if (!arr) continue;
         for (let k = 0; k < arr.length; k++) {
           const i = arr[k];
@@ -731,7 +801,7 @@ export class Landforms {
     let best = Infinity;
     for (let dz = -1; dz <= 1; dz++) {
       for (let dx = -1; dx <= 1; dx++) {
-        const arr = this._hash.get(`${cx + dx},${cz + dz}`);
+        const arr = this._hash.get((cx + dx) * RD_KEY + (cz + dz));
         if (!arr) continue;
         for (let k = 0; k < arr.length; k++) {
           const i = arr[k];
@@ -765,7 +835,7 @@ export class Landforms {
     const idx = this._rx.length;
     this._rx.push(x); this._rz.push(z); this._re.push(e); this._rid.push(roadId);
     this._rw.push(halfW); this._rt.push(type);
-    const key = `${Math.floor(x / RD_CELL)},${Math.floor(z / RD_CELL)}`;
+    const key = Math.floor(x / RD_CELL) * RD_KEY + Math.floor(z / RD_CELL);
     let arr = this._hash.get(key);
     if (!arr) this._hash.set(key, (arr = []));
     arr.push(idx);
@@ -775,7 +845,7 @@ export class Landforms {
     const idx = this._rx.length - 1;
     if (idx < 0) return;
     const x = this._rx[idx], z = this._rz[idx];
-    const key = `${Math.floor(x / RD_CELL)},${Math.floor(z / RD_CELL)}`;
+    const key = Math.floor(x / RD_CELL) * RD_KEY + Math.floor(z / RD_CELL);
     const arr = this._hash.get(key);
     if (arr) {
       const k = arr.lastIndexOf(idx);
@@ -796,7 +866,7 @@ export class Landforms {
     let wSum = 0, weSum = 0, dMin2 = Infinity, nearW = W_PASS, nearT = 0;
     for (let dz = -1; dz <= 1; dz++) {
       for (let dx = -1; dx <= 1; dx++) {
-        const arr = this._hash.get(`${cx + dx},${cz + dz}`);
+        const arr = this._hash.get((cx + dx) * RD_KEY + (cz + dz));
         if (!arr) continue;
         for (let k = 0; k < arr.length; k++) {
           const i = arr[k];
@@ -899,13 +969,22 @@ export class Landforms {
 
 // ---- helpers ----------------------------------------------------------------
 
+/**
+ * Nearest point on a segment. Chapter 5: the result is written into the
+ * shared _SN scratch instead of a fresh object — this is called ~60x per
+ * terrain sample (millions of times per tile window), and the per-call
+ * object was the biggest source of garbage in the whole engine, i.e. of
+ * the GC pauses that showed up as random frame drops while riding.
+ */
+const _SN = { t: 0, d2: 0 };
 function segNearest(px, pz, ax, az, bx, bz) {
   const abx = bx - ax, abz = bz - az;
   const len2 = abx * abx + abz * abz;
   let t = len2 > 0 ? ((px - ax) * abx + (pz - az) * abz) / len2 : 0;
-  t = Math.max(0, Math.min(1, t));
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
   const dx = px - (ax + abx * t), dz = pz - (az + abz * t);
-  return { t, d2: dx * dx + dz * dz };
+  _SN.t = t; _SN.d2 = dx * dx + dz * dz;
+  return _SN;
 }
 
 function rangeBBox(r) {
