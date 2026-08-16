@@ -32,12 +32,15 @@ import { detailTexture } from './textures.js';
 export const TILE = 125;
 const RES = 32;              // quads per side -> 3.90625 m cells (exact binary)
 const CELL = TILE / RES;
-// Chapter 3A anti-popping: the window grew one ring (7x7 -> 9x9, edge
-// ~560 m). New tiles now materialize deep inside the atmospheric haze
-// and swap in over the color-matched far backdrop — no visible popping
-// near roads. Pool is fixed at startup: zero runtime allocations.
-const RADIUS = 4;            // 9x9 window
-const POOL = 85;             // 81 + spare
+// Chapter 3A/3D anti-popping: VISIBLE window 9x9 (edge ~560 m, deep in
+// the haze) PLUS a pre-build ring at radius 5 (Chapter 3D): those tiles
+// are fully built but hidden; when the player crosses a tile boundary
+// the incoming ring only flips visible=true — zero build latency at the
+// moment a tile enters view, so mesh popping cannot happen from build
+// lag. Pool is fixed at startup: zero runtime allocations.
+const RADIUS = 5;            // 11x11 grid window (outermost ring hidden)
+const VIS_R = 4;             // 9x9 visible window
+const POOL = 125;            // 121 + spare
 const WORLD_W = 8000, WORLD_H = 4000;
 
 export class TerrainTiles {
@@ -66,11 +69,22 @@ export class TerrainTiles {
   }
 
   update(px, pz) {
-    this._grid.update(
+    const moved = this._grid.update(
       px, pz,
       (cx, cz) => this._enter(cx, cz),
       (cx, cz, rec) => this._leave(rec)
     );
+    if (moved) {
+      // Chapter 3D: refresh ring visibility — pre-built outer-ring tiles
+      // entering the 9x9 window just flip visible (no build, no pop).
+      this._ccx = Math.floor(px / TILE);
+      this._ccz = Math.floor(pz / TILE);
+      for (const rec of this._grid.cells.values()) {
+        if (!rec || rec === true || !rec.built) continue;
+        rec.mesh.visible =
+          Math.max(Math.abs(rec.cx - this._ccx), Math.abs(rec.cz - this._ccz)) <= VIS_R;
+      }
+    }
 
     // Safety net: the tile under the player is always built.
     const key = `${Math.floor(px / TILE)},${Math.floor(pz / TILE)}`;
@@ -114,12 +128,15 @@ export class TerrainTiles {
     this._pool.release(rec.mesh);
   }
 
-  /** Count of built, visible tiles (debug overlay). */
+  /** Count of built tiles: [visible, prebuilt-hidden] (debug overlay). */
   count() {
-    let n = 0;
+    let n = 0, hid = 0;
     for (const rec of this._grid.cells.values()) {
-      if (rec && rec !== true && rec.built) n++;
+      if (rec && rec !== true && rec.built) {
+        if (rec.mesh.visible) n++; else hid++;
+      }
     }
+    this.hidden = hid;
     return n;
   }
 
@@ -195,7 +212,10 @@ export class TerrainTiles {
 
     mesh.position.set(ox, 0, oz);
     mesh.updateMatrix();
-    mesh.visible = true;
+    // Visible only inside the 9x9 window; the radius-5 ring stays hidden
+    // (pre-built) until the window reaches it.
+    mesh.visible = this._ccx === undefined ||
+      Math.max(Math.abs(rec.cx - this._ccx), Math.abs(rec.cz - this._ccz)) <= VIS_R;
     rec.built = true;
     this.built++;
   }

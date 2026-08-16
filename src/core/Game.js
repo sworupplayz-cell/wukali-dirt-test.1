@@ -40,7 +40,10 @@ export class Game {
 
     this.scene = new THREE.Scene();
     // Far plane covers the Phase 3 continent backdrop (fog ends ~7 km).
-    this.camera = new THREE.PerspectiveCamera(68, 1, 0.1, 12000);
+    // Chapter 3D: near plane 0.45 (was 0.1) — with km-scale far planes the
+    // tiny near plane wasted nearly all depth precision and distant
+    // meshes shimmered. Nothing renders closer than ~0.6 m anyway.
+    this.camera = new THREE.PerspectiveCamera(68, 1, 0.45, 12000);
 
     // Horizon Ride Phase 1B: fixed 10,000 x 5,000 m world, 200 permanent
     // 500 m sectors, 3x3 streaming window around the bike.
@@ -72,7 +75,7 @@ export class Game {
     this._elapsed = 0;
 
     // Simple perf counters, exposed for verification/tuning.
-    this.stats = { fps: 0, frames: 0, last: 0 };
+    this.stats = { fps: 0, frames: 0, last: 0, frameMs: 0, _accMs: 0 };
 
     this._resize();
     window.addEventListener('resize', () => this._resize());
@@ -257,9 +260,12 @@ export class Game {
     this.renderer.render(this.scene, this.camera);
 
     this.stats.frames++;
+    this.stats._accMs += frameDt * 1000;
     if (time - this.stats.last >= 1) {
       this.stats.fps = this.stats.frames;
+      this.stats.frameMs = +(this.stats._accMs / Math.max(1, this.stats.frames)).toFixed(1);
       this.stats.frames = 0;
+      this.stats._accMs = 0;
       this.stats.last = time;
     }
   }

@@ -215,21 +215,35 @@ export class SectorWorld {
     }
     this.tiles.update(pos.x, pos.z);
     this.vegetation.update(pos.x, pos.z);
-    // Keep the shadow frustum centered on the player (cheap: 2 vectors).
+    // Keep the shadow frustum centered on the player. Chapter 3D: SNAP
+    // the rig to shadow-texel-sized world increments — a continuously
+    // sliding ortho frustum resamples every texel every frame and the
+    // whole shadow field shimmers; snapping makes texels land on the
+    // same world positions between frames.
     if (this.sun && this.sun.castShadow) {
-      const y = this.getHeight(pos.x, pos.z);
-      this.sun.position.set(pos.x + 140, y + 150, pos.z + 80);
-      this.sun.target.position.set(pos.x, y, pos.z);
+      const texel = 240 / (this.sun.shadow.mapSize.x || 1024); // frustum width / texels
+      const snap = Math.max(texel, 0.5) * 4;
+      const sx2 = Math.round(pos.x / snap) * snap;
+      const sz2 = Math.round(pos.z / snap) * snap;
+      const y = Math.round(this.getHeight(sx2, sz2) / snap) * snap;
+      this.sun.position.set(sx2 + 140, y + 150, sz2 + 80);
+      this.sun.target.position.set(sx2, y, sz2);
       this.sun.target.updateMatrixWorld();
     }
 
-    const s = this.sectorAt(pos.x, pos.z);
-    this.debug.sectorX = s.x;
-    this.debug.sectorZ = s.z;
-    this.debug.loaded = this._countLoaded();
-    this.debug.tiles = this.tiles.count();
-    this.debug.props = this.props.count;
-    this.debug.trees = this.vegetation.visibleNear + this.vegetation.visibleFar;
+    // Chapter 3D: debug bookkeeping at ~4 Hz instead of per frame — the
+    // map iterations and the sectorAt() record were the frame loop's only
+    // recurring allocations.
+    if ((this._dbgT = (this._dbgT || 0) + 1) >= 15) {
+      this._dbgT = 0;
+      this.debug.sectorX = Math.min(WORLD_COLS - 1, Math.max(0, Math.floor(pos.x / SECTOR_SIZE)));
+      this.debug.sectorZ = Math.min(WORLD_ROWS - 1, Math.max(0, Math.floor(pos.z / SECTOR_SIZE)));
+      this.debug.loaded = this._countLoaded();
+      this.debug.tiles = this.tiles.count();
+      this.debug.tilesHidden = this.tiles.hidden || 0;
+      this.debug.props = this.props.count;
+      this.debug.trees = this.vegetation.visibleNear + this.vegetation.visibleFar;
+    }
   }
 
   _sectorEnter(cx, cz) {

@@ -2,21 +2,23 @@
 
 A lightweight, Android-first, 3D off-road dirt-bike game.
 
-**Current status: Chapter 3C — Graphics quality system.** A complete
-rendering-only quality system: 5 presets (Potato / Low / Medium / High /
-Ultra) covering render scale (0.6-1.5x), render distance (800-3200 m fog +
-matched far plane), shadow quality (off / 512 / 1024 / 1536 / 2048 px — a
-player-following compact ortho sun frustum, PCF), vegetation density
-(25-100% + impostor-ring radius), terrain painted-detail toggle, fog
-quality (linear simple vs FogExp2 atmospheric), anti-aliasing (instant —
-the canvas is hot-swapped for a fresh GL context) and an FPS limiter
-(30/45/60/90/120, render-skip only: physics still steps at 60 Hz). Every
-setting applies INSTANTLY, persists to localStorage and restores on
-launch; first launch auto-detects the device tier (memory/cores/mobile ->
-Potato / Medium / High). New GRAPHICS panel inside Settings with a
-real-time FPS + draw-call preview. F3 shows the active quality preset and
-render scale. Bike physics, terrain generation, roads, camera and
-streaming untouched.
+**Current status: Chapter 3D — Stability & optimization.** Engine polish
+only. TERRAIN POPPING ELIMINATED: the tile grid grew a hidden PRE-BUILD
+ring (11x11 tracked, 9x9 visible) — tiles entering view only flip
+visible=true, they never build in sight (verified: 0 of 611 builds during
+a 6.3 km ride happened inside the visible window). GLITCH FIXES: camera
+near plane 0.1 -> 0.45 (recovers ~4.5x depth precision at km-scale far
+planes — distant shimmer gone), far-terrain backdrop gets polygonOffset +
+a deeper 2.2 m underlay (no z-fighting in the LOD overlap band), and the
+shadow rig now SNAPS to shadow-texel-sized world increments so the shadow
+field no longer shimmers while riding. CAMERA SMOOTHING (controls
+untouched): follow height tracks a slow-smoothed bike altitude (suspension
+bounce and micro-bumps no longer pump the view), the terrain-clearance
+clamp is eased instead of snapping, and the look-at target uses the same
+smoothed altitude — cinematic, still responsive on real drops. PERF: debug
+bookkeeping throttled to 4 Hz (removed the frame loop's only recurring
+allocations), F3 adds FRAME ms. The Chapter 3C quality system (5 presets,
+instant apply, local save) carries over and is re-verified live.
 
 ## Tech
 

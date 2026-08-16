@@ -46,7 +46,7 @@ export class DebugOverlay {
     const vp = g.world.nearestViewpoint ? g.world.nearestViewpoint(p.x, p.z) : null;
     const lm = g.world.nearestDestination ? g.world.nearestDestination(p.x, p.z) : null;
     this.el.textContent =
-      `FPS ${g.stats.fps}\n` +
+      `FPS ${g.stats.fps}  FRAME ${g.stats.frameMs ?? 0} ms\n` +
       `QUALITY ${g.graphics ? g.graphics.preset.toUpperCase() : '-'}  SCALE ${g.graphics ? Math.round(g.graphics.current.renderScale * 100) + '%' : '-'}\n` +
       `X ${p.x.toFixed(1)}  Z ${p.z.toFixed(1)}\n` +
       `SECTOR (${d.sectorX},${d.sectorZ})\n` +

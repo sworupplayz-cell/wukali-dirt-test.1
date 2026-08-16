@@ -25,7 +25,15 @@ const DISCARD_NEAR = 330; // near tile window worst-case covers 375 m
 
 export class FarTerrain {
   constructor(scene, field) {
-    const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
+    // Chapter 3D: polygonOffset pushes the backdrop behind the near tiles
+    // in depth so the overlap band (375-560 m) can never z-fight even at
+    // km-scale depth-buffer precision.
+    const mat = new THREE.MeshLambertMaterial({
+      vertexColors: true,
+      polygonOffset: true,
+      polygonOffsetFactor: 2,
+      polygonOffsetUnits: 4,
+    });
     mat.onBeforeCompile = (shader) => {
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <clipping_planes_fragment>',
@@ -53,7 +61,7 @@ export class FarTerrain {
             const wx = ox + i * STEP, wz = oz + j * STEP;
             field.sample(wx, wz, info);
             pos[v * 3] = wx;
-            pos[v * 3 + 1] = info.h - 1.0; // sit just under the near tiles
+            pos[v * 3 + 1] = info.h - 2.2; // sit clearly under the near tiles
             pos[v * 3 + 2] = wz;
             colorFor(info, rgb, wx, wz);
             col[v * 3] = rgb[0]; col[v * 3 + 1] = rgb[1]; col[v * 3 + 2] = rgb[2];

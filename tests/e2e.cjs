@@ -480,6 +480,82 @@ function check(name, ok, detail = '') {
   check('Loop ride covered 2+ km with no impossible slopes', rides.loopRide.km >= 2);
   check('Crossed 20+ sector borders riding', rides.loopRide.crossings >= 20,
     `${rides.loopRide.crossings} crossings`);
+
+  // ---- Chapter 3D: stability instrumentation over a long ride --------------
+  const stab = await page.evaluate(() => {
+    const g = window.__game;
+    const f = g.world.field;
+    const lf = f.landforms;
+    const tiles = g.world.tiles;
+    // Instrument: count tile builds that happen INSIDE the visible window
+    // (that would be visible popping). Steady-state riding must only ever
+    // build tiles on the hidden pre-build ring.
+    let visibleBuilds = 0, totalBuilds = 0;
+    const origBuild = tiles._build.bind(tiles);
+    tiles._build = (rec) => {
+      totalBuilds++;
+      const pcx = Math.floor(g.bike.position.x / 125), pcz = Math.floor(g.bike.position.z / 125);
+      if (Math.max(Math.abs(rec.cx - pcx), Math.abs(rec.cz - pcz)) <= 4) visibleBuilds++;
+      return origBuild(rec);
+    };
+    // Ride the West Arm + East Arm + half the loop = > 5 km continuous.
+    const input = { throttle: 1, brake: 0, steer: 0, stunt: 0, trick: 0 };
+    const wp = [];
+    for (const rid of [3, 4]) { // West Arm, East Arm
+      const meta = lf.roadMeta.get(rid);
+      for (let i = meta.i0; i < meta.i0 + meta.n; i += 5) wp.push({ x: lf._rx[i], z: lf._rz[i] });
+    }
+    const b = g.bike;
+    let k = 1, crossings = 0, dist = 0, resets = 0, lastWp = 1, stall = 0;
+    let prev = g.world.sectorAt(wp[0].x, wp[0].z);
+    let px = wp[0].x, pz = wp[0].z;
+    b._placeAt(wp[0].x, f.height(wp[0].x, wp[0].z), wp[0].z,
+      Math.atan2(wp[1].x - wp[0].x, wp[1].z - wp[0].z));
+    // settle the pre-build ring after the teleport
+    for (let i = 0; i < 300; i++) g.world.update(b.position);
+    visibleBuilds = 0; totalBuilds = 0;
+    for (let i = 0; i < 60 * 900 && k < wp.length; i++) {
+      const t = wp[k];
+      const dx = t.x - b.position.x, dz = t.z - b.position.z;
+      if (Math.hypot(dx, dz) < 16) { k++; continue; }
+      const want = Math.atan2(dx, dz);
+      let dy = want - b.yaw;
+      dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+      input.steer = Math.max(-1, Math.min(1, -dy * 2.2));
+      input.brake = Math.abs(dy) > 1.1 && Math.abs(b.speed) > 7 ? 0.8 : 0;
+      input.throttle = input.brake > 0 ? 0 : (Math.abs(dy) > 0.6 ? 0.55 : 1);
+      b.update(1 / 60, input);
+      g.world.update(b.position);
+      if ((i & 7) === 0) {
+        const sec = g.world.sectorAt(b.position.x, b.position.z);
+        if (sec.x !== prev.x || sec.z !== prev.z) crossings++;
+        prev = sec;
+        dist += Math.hypot(b.position.x - px, b.position.z - pz);
+        px = b.position.x; pz = b.position.z;
+        if (b.crashed) { b.reset(); resets++; }
+        if (k !== lastWp) { lastWp = k; stall = 0; }
+        else if (++stall > 75) {
+          const pw = wp[k - 1];
+          b._placeAt(pw.x, f.height(pw.x, pw.z), pw.z, want);
+          resets++; stall = 0;
+        }
+      }
+    }
+    tiles._build = origBuild;
+    g.bike._placeAt(4000, f.height(4000, 1965), 1965, 0);
+    g.world.update(g.bike.position);
+    g.followCam.snapTo(g.bike);
+    return { km: +(dist / 1000).toFixed(1), crossings, resets, visibleBuilds, totalBuilds,
+             done: k >= wp.length };
+  });
+  check('Rode 5+ km continuously (arms across the world)', stab.km >= 5 && stab.done,
+    `${stab.km} km, resets=${stab.resets}`);
+  check('Crossed 40+ sector boundaries total',
+    rides.loopRide.crossings + stab.crossings >= 40,
+    `${rides.loopRide.crossings} + ${stab.crossings}`);
+  check('Zero visible tile builds while riding (no popping)',
+    stab.visibleBuilds === 0 && stab.totalBuilds > 20,
+    `${stab.visibleBuilds}/${stab.totalBuilds} builds inside the visible window`);
   check('No wheel sinking during the loop', rides.loopRide.maxDev < 0.15,
     `maxDev=${rides.loopRide.maxDev} m`);
   check('Climbed 3 mountain passes', rides.passesClimbed >= 3, `${rides.passesClimbed}/3`);
@@ -511,7 +587,8 @@ function check(name, ok, detail = '') {
     /ROAD .+/.test(dbg.text) && /RD SLOPE/.test(dbg.text) &&
     /LANDMARK .+/.test(dbg.text) && /ELEVATION -?[\d.]+ m/.test(dbg.text) &&
     /SECTOR \(\d+,\d+\)/.test(dbg.text) && /LOADED \d+/.test(dbg.text) &&
-    /SLOPE [\d.]+%/.test(dbg.text) && /FPS \d+/.test(dbg.text),
+    /SLOPE [\d.]+%/.test(dbg.text) && /FPS \d+/.test(dbg.text) &&
+    /FRAME [\d.]+ ms/.test(dbg.text) && /QUALITY /.test(dbg.text),
     JSON.stringify(dbg.text));
   await page.keyboard.press('F3');
   await sleep(200);

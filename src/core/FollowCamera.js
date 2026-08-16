@@ -35,6 +35,9 @@ export class FollowCamera {
 
   snapTo(bike) {
     this._heading = bike.yaw;
+    this._dt = 1 / 60;
+    this._smoothY = bike.position.y;
+    this._clampY = 0;
     this._computeDesired(bike);
     this._pos.copy(this._desired);
     this._initialized = true;
@@ -44,18 +47,35 @@ export class FollowCamera {
   _computeDesired(bike) {
     const dist = 6.2, height = 2.6;
     const sx = Math.sin(this._heading), cz = Math.cos(this._heading);
+    // Chapter 3D smoothing: the FOLLOW HEIGHT tracks a slow-smoothed bike
+    // altitude instead of the raw one — suspension bounce, kicker lips
+    // and terrain micro-bumps no longer pump the camera vertically
+    // (the fast horizontal chase is unchanged; controls identical).
+    if (this._smoothY === undefined) this._smoothY = bike.position.y;
+    const dy = bike.position.y - this._smoothY;
+    // Faster catch-up on big drops/climbs, gentle on small vibration.
+    const k = Math.min(1, (Math.abs(dy) > 2.5 ? 6 : 2.2) * this._dt);
+    this._smoothY += dy * k;
     this._desired.set(
       bike.position.x - sx * dist,
-      bike.position.y + height,
+      this._smoothY + height,
       bike.position.z - cz * dist
     );
-    // Keep the camera above the terrain.
+    // Terrain clearance: smoothed clamp — rising ground lifts the camera
+    // with an eased response instead of an instant snap; a hard floor
+    // 0.55 m above ground still guarantees no clipping.
     const groundY = this.world.getHeight(this._desired.x, this._desired.z);
-    if (this._desired.y < groundY + 1.1) this._desired.y = groundY + 1.1;
+    const wantMin = groundY + 1.1;
+    if (this._clampY === undefined) this._clampY = 0;
+    const deficit = Math.max(0, wantMin - this._desired.y);
+    this._clampY += (deficit - this._clampY) * Math.min(1, 7 * this._dt);
+    this._desired.y += Math.max(this._clampY, 0);
+    if (this._desired.y < groundY + 0.55) this._desired.y = groundY + 0.55;
   }
 
   update(bike, dt) {
     if (!this._initialized) { this.snapTo(bike); return; }
+    this._dt = dt;
 
     // Smoothly track the bike heading (shortest angular path).
     let d = bike.yaw - this._heading;
@@ -100,9 +120,13 @@ export class FollowCamera {
 
   _apply(bike) {
     this.camera.position.copy(this._pos);
+    // Look-at height uses the same smoothed altitude: the view no longer
+    // nods with every suspension compression.
+    const ty = (this._smoothY !== undefined ? this._smoothY : bike.position.y) +
+      (bike.position.y - (this._smoothY ?? bike.position.y)) * 0.35;
     this._target.set(
       bike.position.x + Math.sin(this._heading) * 2.0,
-      bike.position.y + 1.0,
+      ty + 1.0,
       bike.position.z + Math.cos(this._heading) * 2.0
     );
     this.camera.lookAt(this._target);
