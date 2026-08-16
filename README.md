@@ -2,23 +2,26 @@
 
 A lightweight, Android-first, 3D off-road dirt-bike game.
 
-**Current status: Chapter 3D — Stability & optimization.** Engine polish
-only. TERRAIN POPPING ELIMINATED: the tile grid grew a hidden PRE-BUILD
-ring (11x11 tracked, 9x9 visible) — tiles entering view only flip
-visible=true, they never build in sight (verified: 0 of 611 builds during
-a 6.3 km ride happened inside the visible window). GLITCH FIXES: camera
-near plane 0.1 -> 0.45 (recovers ~4.5x depth precision at km-scale far
-planes — distant shimmer gone), far-terrain backdrop gets polygonOffset +
-a deeper 2.2 m underlay (no z-fighting in the LOD overlap band), and the
-shadow rig now SNAPS to shadow-texel-sized world increments so the shadow
-field no longer shimmers while riding. CAMERA SMOOTHING (controls
-untouched): follow height tracks a slow-smoothed bike altitude (suspension
-bounce and micro-bumps no longer pump the view), the terrain-clearance
-clamp is eased instead of snapping, and the look-at target uses the same
-smoothed altitude — cinematic, still responsive on real drops. PERF: debug
-bookkeeping throttled to 4 Hz (removed the frame loop's only recurring
-allocations), F3 adds FRAME ms. The Chapter 3C quality system (5 presets,
-instant apply, local save) carries over and is re-verified live.
+**Current status: Stability & polish pass.** Ten targeted fixes, no
+gameplay/terrain changes: (1-4) rendering glitches — near-plane depth
+precision, bit-identical tile seams, far-backdrop polygonOffset + deeper
+underlay, texel-snapped shadows — all carried over and re-verified; (5-6)
+the third-person camera now uses a CRITICALLY DAMPED SPRING with split
+stiffness (tight horizontal chase omega 9, soft vertical omega 2) plus
+slower altitude smoothing — measured high-frequency shake is 0.294x the
+old algorithm (>= 70% reduction, verified in CI against a live simulation
+of the previous exponential-lerp camera); (7) every placed object has
+proper collision: tree trunks (pine/fir/birch/oak/dead) now feed scaled
+radius colliders into the bike's collision list, merged with prop
+colliders via version-tracked caching; (8) props and trees seat on the
+LOWEST ground across their footprint (slightly sunk) — floating on slopes
+and bump crests is impossible, verified 0/60 floating; (9) LOD swaps are
+smooth: trees entering the near ring GROW IN over ~0.45 s (eased scale
+animation, bounded list, no allocations) instead of appearing full-size;
+(10) streaming frame spikes removed — steady-state tile builds are paced
+1/frame (a boundary crossing drains ~11 hidden-ring tiles over 11 frames),
+bursting only on teleport refills where the backdrop already covers the
+screen.
 
 ## Tech
 

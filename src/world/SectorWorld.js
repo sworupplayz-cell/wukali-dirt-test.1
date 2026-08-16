@@ -123,7 +123,16 @@ export class SectorWorld {
   }
 
   getColliders() {
-    return this.props.colliders;
+    // Props + near-ring tree trunks (both bounded, rebuilt on streaming
+    // boundaries only). One merged list, refreshed lazily by identity.
+    const pv = this.props.collVersion || 0;
+    const vv = this.vegetation ? this.vegetation.collVersion || 0 : 0;
+    if (this._collPV !== pv || this._collVV !== vv) {
+      this._collPV = pv; this._collVV = vv;
+      this._collAll = this.props.colliders.concat(
+        this.vegetation ? this.vegetation.colliders : []);
+    }
+    return this._collAll || (this._collAll = []);
   }
 
   /**

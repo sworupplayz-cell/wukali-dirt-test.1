@@ -22,6 +22,11 @@ import { hash01, mulberry32, hashInt } from './noise.js';
  * existing prop-collider system); flags/signs/rest spots are ride-through.
  */
 
+// Footprint half-extent for ground seating (metres, scaled by s).
+const FOOT = { flags: 2.2, sign: 0.4, lookout: 1.7, cabin: 1.9, cave: 1.8,
+  rest: 1.3, bench: 1.0, bridge: 1.8, arch: 3.4, fence: 3.1, marker: 0.2,
+  rocks: 1.6, boulder: 1.2, slab: 1.7, spire: 1.1, scree: 1.3 };
+
 const CAP = { flags: 48, sign: 48, lookout: 24, cabin: 32, cave: 24,
   rest: 48, bench: 32, bridge: 16, arch: 8, fence: 96, marker: 64,
   // Chapter 3B: 5 reusable rock models (sizes/colors), instanced.
@@ -180,6 +185,18 @@ export class Props {
     return list;
   }
 
+  /** Ground seating: lowest ground across the footprint, slightly sunk —
+   *  a prop can never float off a slope or hover on a bump crest. */
+  _groundY(p) {
+    const f = this.field;
+    const r = (FOOT[p.t] || 1) * (p.s || 1);
+    let y = f.height(p.x, p.z);
+    y = Math.min(y,
+      f.height(p.x + r, p.z), f.height(p.x - r, p.z),
+      f.height(p.x, p.z + r), f.height(p.x, p.z - r));
+    return y - 0.08;
+  }
+
   /** Rewrite all instance matrices from the active sector set. */
   rebuild(sectorIds) {
     const counts = {};
@@ -192,7 +209,7 @@ export class Props {
         const t = this.types[p.t];
         const n = counts[p.t];
         if (n >= t.max) continue;
-        this._p.set(p.x, p.y, p.z);
+        this._p.set(p.x, this._groundY(p), p.z);
         this._e.set(0, p.yaw, 0);
         this._q.setFromEuler(this._e);
         this._s.setScalar(p.s);
@@ -207,6 +224,7 @@ export class Props {
       m.instanceMatrix.needsUpdate = true;
     }
     this.count = total;
+    this.collVersion = (this.collVersion || 0) + 1;
   }
 }
 

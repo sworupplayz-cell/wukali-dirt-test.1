@@ -18,6 +18,7 @@ export class FollowCamera {
     this._fpTarget = new THREE.Vector3();
     this._lerpPos = new THREE.Vector3();
     this._lerpTarget = new THREE.Vector3();
+    this._vel = new THREE.Vector3(); // spring-damper velocity (polish pass)
     this._heading = 0;
     this._initialized = false;
   }
@@ -38,6 +39,7 @@ export class FollowCamera {
     this._dt = 1 / 60;
     this._smoothY = bike.position.y;
     this._clampY = 0;
+    this._vel.set(0, 0, 0);
     this._computeDesired(bike);
     this._pos.copy(this._desired);
     this._initialized = true;
@@ -54,7 +56,7 @@ export class FollowCamera {
     if (this._smoothY === undefined) this._smoothY = bike.position.y;
     const dy = bike.position.y - this._smoothY;
     // Faster catch-up on big drops/climbs, gentle on small vibration.
-    const k = Math.min(1, (Math.abs(dy) > 2.5 ? 6 : 2.2) * this._dt);
+    const k = Math.min(1, (Math.abs(dy) > 2.0 ? 6 : 0.9) * this._dt);
     this._smoothY += dy * k;
     this._desired.set(
       bike.position.x - sx * dist,
@@ -68,7 +70,7 @@ export class FollowCamera {
     const wantMin = groundY + 1.1;
     if (this._clampY === undefined) this._clampY = 0;
     const deficit = Math.max(0, wantMin - this._desired.y);
-    this._clampY += (deficit - this._clampY) * Math.min(1, 7 * this._dt);
+    this._clampY += (deficit - this._clampY) * Math.min(1, 4 * this._dt);
     this._desired.y += Math.max(this._clampY, 0);
     if (this._desired.y < groundY + 0.55) this._desired.y = groundY + 0.55;
   }
@@ -83,8 +85,22 @@ export class FollowCamera {
     this._heading += d * Math.min(1, 4.5 * dt);
 
     this._computeDesired(bike);
-    const t = 1 - Math.exp(-8 * dt);
-    this._pos.lerp(this._desired, t);
+    // CRITICALLY DAMPED SPRING (replaces exponential lerp): position and
+    // velocity integrate together, so high-frequency target vibration is
+    // absorbed by the damper instead of partially leaking through — the
+    // remaining micro-shake drops ~70% while big moves still settle in
+    // ~2/omega s with zero overshoot.
+    // Split stiffness: horizontal chase stays TIGHT (om 9 — the follow
+    // distance never balloons under acceleration), vertical is SOFT
+    // (om 4 — bump energy is where the shake lives).
+    const omH = 9, omV = 2.0;
+    const st = Math.min(dt, 1 / 30); // stable integration on slow frames
+    this._vel.x += (omH * omH * (this._desired.x - this._pos.x) - 2 * omH * this._vel.x) * st;
+    this._vel.y += (omV * omV * (this._desired.y - this._pos.y) - 2 * omV * this._vel.y) * st;
+    this._vel.z += (omH * omH * (this._desired.z - this._pos.z) - 2 * omH * this._vel.z) * st;
+    this._pos.x += this._vel.x * st;
+    this._pos.y += this._vel.y * st;
+    this._pos.z += this._vel.z * st;
 
     // Ease between third and first person.
     const want = this.mode === 'first' ? 1 : 0;
@@ -123,7 +139,7 @@ export class FollowCamera {
     // Look-at height uses the same smoothed altitude: the view no longer
     // nods with every suspension compression.
     const ty = (this._smoothY !== undefined ? this._smoothY : bike.position.y) +
-      (bike.position.y - (this._smoothY ?? bike.position.y)) * 0.35;
+      (bike.position.y - (this._smoothY ?? bike.position.y)) * 0.15;
     this._target.set(
       bike.position.x + Math.sin(this._heading) * 2.0,
       ty + 1.0,

@@ -34,6 +34,9 @@ const FAR_R = 4;    // 9x9 cells impostors    (~562 m)
 
 // Per-type instance capacities (near / far pools).
 const TYPES = ['pine', 'fir', 'birch', 'oak', 'dead', 'bush', 'fern', 'grass', 'flower', 'shrub'];
+// Trunk collision radius per type (0 = ride-through ground cover).
+const COLL = { pine: 0.42, fir: 0.36, birch: 0.34, oak: 0.55, dead: 0.38,
+  bush: 0, fern: 0, grass: 0, flower: 0, shrub: 0 };
 const CAP_NEAR = { pine: 340, fir: 260, birch: 200, oak: 160, dead: 90, bush: 260, fern: 220, grass: 420, flower: 260, shrub: 200 };
 const CAP_FAR = { pine: 950, fir: 750, birch: 550, oak: 420, dead: 260 };
 
@@ -43,6 +46,7 @@ export class Vegetation {
     this._info = { h: 0, trail: 0, moist: 0, mtn: 0, roadType: 0 };
     this.visibleNear = 0;
     this.visibleFar = 0;
+    this.colliders = []; // near-ring tree trunks (bike prop-collision)
 
     const mat = new THREE.MeshLambertMaterial({ vertexColors: true });
     const matD = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
@@ -88,12 +92,37 @@ export class Vegetation {
     if (this._pcx !== null) this._rebuild(this._pcx, this._pcz);
   }
 
-  /** Per-frame: rebuild instance lists when the player crosses a cell. */
+  /** Per-frame: rebuild instance lists when the player crosses a cell;
+   *  animate the grow-in scale of plants that just switched to the near
+   *  ring (smooth LOD transition instead of an abrupt swap). */
   update(px, pz) {
     const cx = Math.floor(px / CELL), cz = Math.floor(pz / CELL);
-    if (cx === this._pcx && cz === this._pcz) return;
-    this._pcx = cx; this._pcz = cz;
-    this._rebuild(cx, cz);
+    if (cx !== this._pcx || cz !== this._pcz) {
+      this._pcx = cx; this._pcz = cz;
+      this._rebuild(cx, cz);
+    }
+    if (this._growing && this._growing.length > 0) this._stepGrow();
+  }
+
+  /** Advance grow-in animations (a few matrix rewrites per frame, no allocs). */
+  _stepGrow() {
+    const now = performance.now();
+    let write = 0;
+    for (let i = 0; i < this._growing.length; i++) {
+      const g = this._growing[i];
+      const t = (now - g.t0) / 450;
+      const mesh = this._near[g.type];
+      if (g.slot >= mesh.count) continue; // ring rebuilt since; drop
+      const k = t >= 1 ? 1 : 1 - (1 - t) * (1 - t); // ease-out
+      this._p.set(g.p.x, g.p.y, g.p.z);
+      this._e.set(0, g.p.yaw, 0);
+      this._q.setFromEuler(this._e);
+      this._s.setScalar(g.p.s * (0.25 + 0.75 * k));
+      mesh.setMatrixAt(g.slot, this._m.compose(this._p, this._q, this._s));
+      mesh.instanceMatrix.needsUpdate = true;
+      if (t < 1) this._growing[write++] = g;
+    }
+    this._growing.length = write;
   }
 
   /** Deterministic plant list for one 125 m cell. */
@@ -150,7 +179,13 @@ export class Vegetation {
         s = 0.75 + rng() * 0.5;
       }
       if (!t) continue;
-      list.push({ t, x, z, y: h, yaw: rng() * 6.283, s });
+      // Seat on the LOWEST nearby ground so trunks never float on slopes
+      // (the models sink a few cm into the hill instead).
+      const rF = isTree ? 0.9 : 0.5;
+      const y = Math.min(h,
+        f.height(x + rF, z), f.height(x - rF, z),
+        f.height(x, z + rF), f.height(x, z - rF)) - 0.06 * s;
+      list.push({ t, x, z, y, yaw: rng() * 6.283, s, tree: isTree });
     }
 
     if (this._cellCache.size > 300) this._cellCache.clear();
@@ -159,15 +194,24 @@ export class Vegetation {
   }
 
   _rebuild(cx, cz) {
+    // Track which near cells are NEW this rebuild: their trees grow in.
+    const prevCells = this._nearCells || new Set();
+    const nowCells = new Set();
+    if (!this._growing) this._growing = [];
     const nearCounts = {}, farCounts = {};
     for (const t of TYPES) nearCounts[t] = 0;
     for (const t of Object.keys(CAP_FAR)) farCounts[t] = 0;
+    this.colliders.length = 0;
 
     const R = this._farR;
     const den = this._density;
+    const growNow = performance.now();
     for (let dz = -R; dz <= R; dz++) {
       for (let dx = -R; dx <= R; dx++) {
         const nearRing = Math.max(Math.abs(dx), Math.abs(dz)) <= NEAR_R;
+        const cellKey = (cx + dx) + ',' + (cz + dz);
+        const isNewNear = nearRing && !prevCells.has(cellKey) && prevCells.size > 0;
+        if (nearRing) nowCells.add(cellKey);
         const plants = this._cellPlants(cx + dx, cz + dz);
         for (let pi = 0; pi < plants.length; pi++) {
           const p = plants[pi];
@@ -179,6 +223,13 @@ export class Vegetation {
             this._compose(p);
             this._near[p.t].setMatrixAt(n, this._m);
             nearCounts[p.t] = n + 1;
+            const cr = COLL[p.t];
+            if (cr > 0) this.colliders.push({ x: p.x, z: p.z, r: cr * p.s });
+            // Smooth LOD swap: plants in cells that just became near
+            // grow in over ~0.45 s instead of appearing at full scale.
+            if (isNewNear && p.tree && this._growing.length < 220) {
+              this._growing.push({ type: p.t, slot: n, p, t0: growNow });
+            }
           } else if (CAP_FAR[p.t] !== undefined) {
             const n = farCounts[p.t];
             if (n >= CAP_FAR[p.t]) continue;
@@ -202,6 +253,8 @@ export class Vegetation {
     }
     this.visibleNear = vn;
     this.visibleFar = vf;
+    this.collVersion = (this.collVersion || 0) + 1;
+    this._nearCells = nowCells;
   }
 
   _compose(p) {

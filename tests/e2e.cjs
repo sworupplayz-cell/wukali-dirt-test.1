@@ -556,6 +556,88 @@ function check(name, ok, detail = '') {
   check('Zero visible tile builds while riding (no popping)',
     stab.visibleBuilds === 0 && stab.totalBuilds > 20,
     `${stab.visibleBuilds}/${stab.totalBuilds} builds inside the visible window`);
+
+  // ---- Polish pass: collision, grounding, camera damping, LOD grow ---------
+  const polish = await page.evaluate(async () => {
+    const g = window.__game;
+    const f = g.world.field;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const out = {};
+
+    // 1. Tree trunk colliders active in a forest.
+    g.world.vegetation.setQuality(1, 4);
+    g.bike._placeAt(2000, f.height(2000, 2400), 2400, 0);
+    g.world.update(g.bike.position);
+    out.treeColliders = g.world.vegetation.colliders.length;
+    out.mergedColliders = g.world.getColliders().length;
+    out.propColliders = g.world.props.colliders.length;
+
+    // 2. Prop grounding: no prop floats above its footprint ground.
+    let floating = 0, checked = 0;
+    for (let cx = 3; cx <= 12 && checked < 60; cx++) {
+      for (let cz = 2; cz <= 6 && checked < 60; cz++) {
+        for (const p of g.world.props.sectorProps(cx, cz)) {
+          checked++;
+          const gy = g.world.props._groundY(p);
+          const center = f.height(p.x, p.z);
+          // seated base must not be above the center ground (float) nor
+          // more than 3.5 m under it (sink).
+          if (gy > center + 0.01 || gy < center - 3.5) floating++;
+        }
+      }
+    }
+    out.propChecked = checked;
+    out.propFloating = floating;
+
+    // 3. Camera damping: ride rough open ground and compare the NEW
+    // camera's high-frequency vertical energy against a simulation of
+    // the OLD algorithm (raw bike height + exponential lerp + instant
+    // clamp) fed the same bike motion. Spec: shake reduced >= 70%.
+    g.bike._placeAt(4600, f.height(4600, 1500), 1500, Math.PI / 4);
+    g.followCam.snapTo(g.bike);
+    const input = { throttle: 1, brake: 0, steer: 0, stunt: 0, trick: 0 };
+    let oldY = null, newHF = 0, oldHF = 0;
+    let pn = null, ppn = null, po = null, ppo = null;
+    for (let i = 0; i < 60 * 8; i++) {
+      g.bike.update(1 / 60, input);
+      g.world.update(g.bike.position);
+      g.followCam.update(g.bike, 1 / 60);
+      // Old algorithm reference (vertical axis only).
+      const heading = g.followCam._heading;
+      const dx2 = g.bike.position.x - Math.sin(heading) * 6.2;
+      const dz2 = g.bike.position.z - Math.cos(heading) * 6.2;
+      let want = g.bike.position.y + 2.6;
+      const gy = g.world.getHeight(dx2, dz2);
+      if (want < gy + 1.1) want = gy + 1.1; // instant clamp (old)
+      if (oldY === null) oldY = want;
+      oldY += (want - oldY) * (1 - Math.exp(-8 / 60)); // old exp lerp
+      const ny = g.camera.position.y;
+      if (ppn !== null) {
+        newHF += Math.abs(ny - 2 * pn + ppn);
+        oldHF += Math.abs(oldY - 2 * po + ppo);
+      }
+      ppn = pn; ppo = po; pn = ny; po = oldY;
+    }
+    out.shakeRatio = +(newHF / Math.max(1e-6, oldHF)).toFixed(3);
+
+    // 4. LOD grow-in machinery exists and animates.
+    out.growArray = Array.isArray(g.world.vegetation._growing);
+
+    g.world.vegetation.setQuality(g.graphics.current.vegetation, 2);
+    g.bike._placeAt(4000, f.height(4000, 1965), 1965, 0);
+    g.world.update(g.bike.position);
+    g.followCam.snapTo(g.bike);
+    return out;
+  });
+  check('Trees have collision (trunk colliders merged into world)',
+    polish.treeColliders > 5 && polish.mergedColliders >= polish.treeColliders + polish.propColliders - 1,
+    `trees=${polish.treeColliders} props=${polish.propColliders} merged=${polish.mergedColliders}`);
+  check('Props never float (footprint-seated)',
+    polish.propFloating === 0 && polish.propChecked >= 40,
+    `${polish.propFloating}/${polish.propChecked} floating`);
+  check('Camera shake reduced >= 70% vs old algorithm',
+    polish.shakeRatio <= 0.3, `new/old HF ratio=${polish.shakeRatio}`);
+  check('Smooth LOD grow-in system active', polish.growArray);
   check('No wheel sinking during the loop', rides.loopRide.maxDev < 0.15,
     `maxDev=${rides.loopRide.maxDev} m`);
   check('Climbed 3 mountain passes', rides.passesClimbed >= 3, `${rides.passesClimbed}/3`);

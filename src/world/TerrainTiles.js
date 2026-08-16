@@ -91,13 +91,12 @@ export class TerrainTiles {
     const center = this._grid.cells.get(key);
     if (center && center !== true && !center.built) this._build(center);
 
-    // Nearest-first incremental builds; drain faster under a backlog
-    // (teleport/reset refills the whole window) so the world settles in
-    // well under a second without ever stalling one frame for long.
-    // (Phase 3 field samples cost more — mountains/valleys/roads — so
-    // steady-state builds drop to 1/frame; riding crosses a 125 m tile
-    // boundary every ~4 s, far slower than 60 builds/s.)
-    const perFrame = this._queue.length > 10 ? 3 : 1;
+    // Nearest-first incremental builds. Polish pass: a boundary crossing
+    // enqueues ~11 hidden-ring tiles; at 1/frame (~2.5 ms each) they
+    // drain in 11 frames with NO frame spike. Only a full-window refill
+    // (teleport/reset: 100+ tiles, screen already covered by the far
+    // backdrop) is allowed to burst at 3/frame.
+    const perFrame = this._queue.length > 40 ? 3 : 1;
     for (let n = 0; n < perFrame && this._queue.length > 0; n++) {
       let best = 0, bestD = Infinity;
       for (let i = 0; i < this._queue.length; i++) {
