@@ -114,6 +114,7 @@ export class BikeModel {
     this._offF = 0; // per-wheel terrain-contact travel (see sync)
     this._offR = 0;
 
+    g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
     scene.add(g);
     scene.add(this.shadow);
   }

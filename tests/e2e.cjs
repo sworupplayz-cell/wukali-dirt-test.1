@@ -40,6 +40,17 @@ function check(name, ok, detail = '') {
   });
 
   await page.goto(URL, { waitUntil: 'networkidle0', timeout: 30000 });
+  // CI runs on a software rasterizer: pin the Potato preset (what
+  // auto-detect would pick on such a device) so wall-clock ride checks
+  // simulate at full speed. The graphics-system checks still exercise
+  // every preset explicitly.
+  await page.evaluate(() => {
+    localStorage.setItem('horizon_graphics', JSON.stringify({
+      preset: 'potato', renderScale: 0.6, renderDist: 800, shadows: 0,
+      vegetation: 0.25, terrainDetail: 0, fogQuality: 0, antialias: false, fpsLimit: 60,
+    }));
+  });
+  await page.reload({ waitUntil: 'networkidle0' });
   await sleep(1800);
 
   const state = () => page.evaluate(() => {
@@ -534,6 +545,7 @@ function check(name, ok, detail = '') {
   const veg = await page.evaluate(() => {
     const g = window.__game;
     const V = g.world.vegetation;
+    V.setQuality(1, 4); // full density for this check (CI pins Potato)
     // Move to the forest belt NW of the meadow to count trees there.
     g.bike._placeAt(2900, g.world.getHeight(2900, 1500), 1500, 0);
     g.world.update(g.bike.position);
@@ -543,7 +555,8 @@ function check(name, ok, detail = '') {
       near: V.visibleNear, far: V.visibleFar, nearTypes,
       lodWorks: V.visibleFar > 0 && V.visibleNear > 0,
     };
-    // Return the bike to the meadow for the following tests.
+    // Restore CI density and return the bike to the meadow.
+    V.setQuality(g.graphics.current.vegetation, 2);
     g.bike._placeAt(4000, g.world.getHeight(4000, 1965), 1965, 0);
     g.world.update(g.bike.position);
     g.followCam.snapTo(g.bike);
@@ -553,6 +566,59 @@ function check(name, ok, detail = '') {
     veg.near > 50, `near=${veg.near} far=${veg.far} ${JSON.stringify(veg.nearTypes)}`);
   check('Vegetation LOD works (far impostor ring populated)', veg.lodWorks,
     `near=${veg.near} far=${veg.far}`);
+
+  // ---- Chapter 3C: graphics quality system ----------------------------------
+  const gfx = await page.evaluate(async () => {
+    const g = window.__game;
+    const G = g.graphics;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const out = {};
+    G.setPreset('potato');
+    await sleep(500);
+    out.potato = {
+      ratio: +g.renderer.getPixelRatio().toFixed(2),
+      far: g.camera.far,
+      fog: g.scene.fog.isFogExp2 ? 'exp2' : 'linear',
+      shadows: g.renderer.shadowMap.enabled,
+      veg: g.world.vegetation._density,
+    };
+    G.setPreset('ultra');
+    await sleep(500);
+    out.ultra = {
+      ratio: +g.renderer.getPixelRatio().toFixed(2),
+      far: g.camera.far,
+      fog: g.scene.fog.isFogExp2 ? 'exp2' : 'linear',
+      shadows: g.renderer.shadowMap.enabled,
+      shadowSize: g.world.sun.shadow.mapSize.x,
+      veg: g.world.vegetation._density,
+    };
+    out.saved = JSON.parse(localStorage.getItem('horizon_graphics')).preset;
+    G.set('vegetation', 0.5);
+    out.custom = G.preset;
+    G.setPreset('potato'); // keep CI fast for the remaining checks
+    // Let the fresh GL context finish its first compile+render frames —
+    // on the CI software rasterizer this stalls RAF for a while and the
+    // physics accumulator caps into slow motion during the stall.
+    await sleep(1500);
+    return out;
+  });
+  check('Potato preset applies instantly (0.6x scale, shadows off, linear fog, 25% veg)',
+    gfx.potato.ratio <= 0.65 && !gfx.potato.shadows && gfx.potato.fog === 'linear' &&
+    gfx.potato.veg === 0.25 && gfx.potato.far === 3200,
+    JSON.stringify(gfx.potato));
+  check('Ultra preset applies instantly (1.5x scale, 2048 shadows, full veg, max distance)',
+    gfx.ultra.ratio >= 1.4 && gfx.ultra.shadows && gfx.ultra.shadowSize === 2048 &&
+    gfx.ultra.veg === 1 && gfx.ultra.far === 12000,
+    JSON.stringify(gfx.ultra));
+  check('Graphics settings persist to localStorage', gfx.saved === 'ultra');
+  check('Manual override marks preset as custom', gfx.custom === 'custom');
+  const gfxUi = await page.evaluate(() => ({
+    panel: !!document.getElementById('graphics-overlay'),
+    presets: document.querySelectorAll('#gfx-presets button').length,
+    fpsRow: !!document.getElementById('gfx-fps'),
+  }));
+  check('Graphics UI panel present (5 presets + FPS preview)',
+    gfxUi.panel && gfxUi.presets === 5 && gfxUi.fpsRow);
 
   // ================= Pause =================
   await page.keyboard.press('KeyP');
@@ -565,10 +631,16 @@ function check(name, ok, detail = '') {
   check('Resume works', s.state === 'playing');
 
   // ================= Mobile controls =================
+  await page.evaluate(() => {
+    const g = window.__game;
+    g.bike._placeAt(4000, g.world.getHeight(4000, 1700), 1700, 0);
+    g.followCam.snapTo(g.bike);
+  });
+  await sleep(400);
   const gasBtn = await page.$('#btn-gas');
   const box = await gasBtn.boundingBox();
   await page.touchscreen.touchStart(box.x + box.width / 2, box.y + box.height / 2);
-  await sleep(1500);
+  await sleep(2500);
   s = await state();
   const touchSpeed = s.speed;
   await page.touchscreen.touchEnd();

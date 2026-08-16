@@ -46,6 +46,7 @@ export class TerrainTiles {
     // Chapter 3B: hand-painted detail map multiplied over the vertex-color
     // palette (one shared 256px canvas texture, world-space tiled UVs).
     this._mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: detailTexture() });
+    this._detailOn = true;
     this._pool = new ObjectPool(() => this._makeMesh(scene), POOL);
     this._grid = new ChunkGrid(TILE, RADIUS);
     this._queue = [];
@@ -54,6 +55,14 @@ export class TerrainTiles {
     // (RES+3)^2 height grid incl. 1-cell border for normals.
     this._hgrid = new Float32Array((RES + 3) * (RES + 3));
     this.built = 0; // debug counter
+  }
+
+  /** Graphics quality hook: toggle the painted brushwork detail map. */
+  setDetail(on) {
+    if (on === this._detailOn) return;
+    this._detailOn = on;
+    this._mat.map = on ? detailTexture() : null;
+    this._mat.needsUpdate = true;
   }
 
   update(px, pz) {
@@ -196,6 +205,7 @@ export class TerrainTiles {
     const mesh = new THREE.Mesh(geo, this._mat);
     mesh.matrixAutoUpdate = false;
     mesh.visible = false;
+    mesh.receiveShadow = true; // costs nothing while shadows are off
     scene.add(mesh);
     return mesh;
   }

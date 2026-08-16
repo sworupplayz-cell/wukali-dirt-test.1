@@ -8,6 +8,7 @@ import { GameAudio } from './GameAudio.js';
 import { RunStats } from './RunStats.js';
 import { StuntTracker } from './StuntTracker.js';
 import { Settings } from './Settings.js';
+import { Graphics } from './Graphics.js';
 
 export const State = {
   MENU: 'menu',
@@ -24,14 +25,18 @@ export class Game {
     this.state = State.MENU;
     this.onStateChange = null; // UI listens
 
+    this._canvas = canvas;
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       antialias: false,
       powerPreference: 'high-performance',
     });
     // Cap the render resolution — full DPR on phones costs frames for
-    // no visible gain in a low-poly scene.
+    // no visible gain in a low-poly scene. (Chapter 3C: the Graphics
+    // system overrides this with the render-scale setting.)
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
+    this._fpsInterval = 0; // 0 = uncapped (vsync); else min seconds/frame
+    this._lastRender = 0;
 
     this.scene = new THREE.Scene();
     // Far plane covers the Phase 3 continent backdrop (fog ends ~7 km).
@@ -45,6 +50,7 @@ export class Game {
     this.followCam = new FollowCamera(this.camera, this.world);
     this.input = new Input();
     this.settings = new Settings();
+    this.graphics = new Graphics();
     this.input.attachSettings(this.settings);
     this.audio = new GameAudio();
     this.run = new RunStats();
@@ -73,6 +79,8 @@ export class Game {
 
     this._groundNormal = new THREE.Vector3(0, 1, 0);
     this._syncModel();
+    // Chapter 3C: restore saved graphics settings (or auto-detected tier).
+    this.graphics.attach(this);
     requestAnimationFrame((t) => this._loop(t));
   }
 
@@ -148,6 +156,37 @@ export class Game {
     this.camera.updateProjectionMatrix();
   }
 
+  // ---- Graphics quality plumbing (Chapter 3C) -----------------------------
+
+  /** Frame-rate cap: 0/undefined = vsync-uncapped. */
+  setFpsLimit(fps) {
+    this._fpsInterval = fps && fps < 240 ? 1 / fps : 0;
+  }
+
+  /**
+   * Swap the canvas for a fresh one with different context attributes
+   * (anti-aliasing cannot be toggled on a live WebGL context). All
+   * scene resources re-upload automatically on the next render.
+   */
+  recreateRenderer(antialias) {
+    const old = this._canvas;
+    const fresh = old.cloneNode(false);
+    old.parentNode.replaceChild(fresh, old);
+    this._canvas = fresh;
+    const prevShadows = this.renderer.shadowMap.enabled;
+    const prevRatio = this.renderer.getPixelRatio();
+    this.renderer.dispose();
+    this.renderer = new THREE.WebGLRenderer({
+      canvas: fresh,
+      antialias,
+      powerPreference: 'high-performance',
+    });
+    this.renderer.shadowMap.enabled = prevShadows;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.renderer.setPixelRatio(prevRatio);
+    this._resize();
+  }
+
   _syncModel(dt = 1 / 60) {
     // Rider rides in third person; hidden once the POV blend passes helmet
     // distance so the camera never clips through him.
@@ -209,6 +248,12 @@ export class Game {
     }
 
     this._syncModel(frameDt);
+    // FPS limit (Chapter 3C): skip the RENDER when the frame budget says
+    // so — simulation above already ran, so physics stays exact.
+    if (this._fpsInterval > 0) {
+      if (time - this._lastRender < this._fpsInterval * 0.96) return;
+      this._lastRender = time;
+    }
     this.renderer.render(this.scene, this.camera);
 
     this.stats.frames++;

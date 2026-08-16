@@ -54,6 +54,7 @@ export class Vegetation {
       m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       m.count = 0;
       m.frustumCulled = false;
+      m.castShadow = true; // only renders into the map when shadows are on
       scene.add(m);
       this._near[t] = m;
     }
@@ -75,6 +76,16 @@ export class Vegetation {
     this._cellCache = new Map();
     this._pcx = null;
     this._pcz = null;
+    this._density = 1;   // Chapter 3C: fraction of plants kept
+    this._farR = FAR_R;  // Chapter 3C: impostor ring radius (cells)
+  }
+
+  /** Graphics quality hook: density in [0,1] + far ring radius (cells). */
+  setQuality(density, farR) {
+    if (density === this._density && farR === this._farR) return;
+    this._density = density;
+    this._farR = Math.max(NEAR_R, Math.min(FAR_R, farR));
+    if (this._pcx !== null) this._rebuild(this._pcx, this._pcz);
   }
 
   /** Per-frame: rebuild instance lists when the player crosses a cell. */
@@ -152,11 +163,16 @@ export class Vegetation {
     for (const t of TYPES) nearCounts[t] = 0;
     for (const t of Object.keys(CAP_FAR)) farCounts[t] = 0;
 
-    for (let dz = -FAR_R; dz <= FAR_R; dz++) {
-      for (let dx = -FAR_R; dx <= FAR_R; dx++) {
+    const R = this._farR;
+    const den = this._density;
+    for (let dz = -R; dz <= R; dz++) {
+      for (let dx = -R; dx <= R; dx++) {
         const nearRing = Math.max(Math.abs(dx), Math.abs(dz)) <= NEAR_R;
         const plants = this._cellPlants(cx + dx, cz + dz);
-        for (const p of plants) {
+        for (let pi = 0; pi < plants.length; pi++) {
+          const p = plants[pi];
+          // Density thinning: deterministic per-plant keep test.
+          if (den < 1 && hash01(pi, p.x | 0, 0x5c1) > den) continue;
           if (nearRing) {
             const n = nearCounts[p.t];
             if (n >= CAP_NEAR[p.t]) continue;

@@ -215,6 +215,13 @@ export class SectorWorld {
     }
     this.tiles.update(pos.x, pos.z);
     this.vegetation.update(pos.x, pos.z);
+    // Keep the shadow frustum centered on the player (cheap: 2 vectors).
+    if (this.sun && this.sun.castShadow) {
+      const y = this.getHeight(pos.x, pos.z);
+      this.sun.position.set(pos.x + 140, y + 150, pos.z + 80);
+      this.sun.target.position.set(pos.x, y, pos.z);
+      this.sun.target.updateMatrixWorld();
+    }
 
     const s = this.sectorAt(pos.x, pos.z);
     this.debug.sectorX = s.x;
@@ -247,9 +254,23 @@ export class SectorWorld {
     scene.add(new THREE.HemisphereLight(0xbcd6f5, 0x8a7a52, 0.85)); // cool sky / warm bounce
     const sun = new THREE.DirectionalLight(0xffe3b0, 1.35);         // warm afternoon sun
     sun.position.set(70, 75, 40);
+    // Chapter 3C: shadow rig (enabled/sized by the Graphics system).
+    // The sun light + its target follow the player in update() so the
+    // compact ortho frustum always covers the area around the bike.
+    sun.castShadow = false;
+    sun.shadow.camera.near = 20;
+    sun.shadow.camera.far = 420;
+    sun.shadow.camera.left = -120;
+    sun.shadow.camera.right = 120;
+    sun.shadow.camera.top = 120;
+    sun.shadow.camera.bottom = -120;
+    sun.shadow.bias = -0.0006;
     scene.add(sun);
+    scene.add(sun.target);
+    this.sun = sun;
     const fill = new THREE.DirectionalLight(0x9db8e8, 0.22);        // cool counter-fill
     fill.position.set(-50, 40, -60);
     scene.add(fill);
+    this.fill = fill;
   }
 }

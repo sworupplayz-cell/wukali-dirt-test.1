@@ -2,23 +2,21 @@
 
 A lightweight, Android-first, 3D off-road dirt-bike game.
 
-**Current status: Chapter 3B — Art & performance pass.** The world is now
-stylized low-poly hand-painted: a procedural 512x512 shared ground atlas
-(grass/dirt/rock/gravel/snow/mud painted-daub cells) plus a 256px seamless
-neutral detail map world-tiled over the terrain and multiplied with the
-vertex-color palette — brushwork without breaking LOD color matching. Road
-wear is painted into the palette: worn tire paths, center crown, gravel
-shoulders, scattered stones, plus a few cm of wheel-rut/washboard height
-character. Five reusable instanced rock models (cluster, boulder, slab,
-spire, scree) replace the single rock. NEW: the vegetation system — 10
-plant types (pine, fir, birch, small oak, dead tree, bush, fern, grass
-patch, flowers, shrub) as one InstancedMesh per type with a far impostor
-LOD ring (near 5x5 cells full models, far 9x9 cone impostors, ground cover
-distance-culled), deterministic per-cell placement off roads/meadow/lake,
-species by altitude & moisture. Lighting: warm afternoon sun + cool blue
-ambient + cool counter-fill, vertical sky gradient texture, FogExp2 tinted
-to the horizon band. F3 adds TREES (visible/near). All physics, roads,
-terrain shape, streaming, camera, controls and UI untouched.
+**Current status: Chapter 3C — Graphics quality system.** A complete
+rendering-only quality system: 5 presets (Potato / Low / Medium / High /
+Ultra) covering render scale (0.6-1.5x), render distance (800-3200 m fog +
+matched far plane), shadow quality (off / 512 / 1024 / 1536 / 2048 px — a
+player-following compact ortho sun frustum, PCF), vegetation density
+(25-100% + impostor-ring radius), terrain painted-detail toggle, fog
+quality (linear simple vs FogExp2 atmospheric), anti-aliasing (instant —
+the canvas is hot-swapped for a fresh GL context) and an FPS limiter
+(30/45/60/90/120, render-skip only: physics still steps at 60 Hz). Every
+setting applies INSTANTLY, persists to localStorage and restores on
+launch; first launch auto-detects the device tier (memory/cores/mobile ->
+Potato / Medium / High). New GRAPHICS panel inside Settings with a
+real-time FPS + draw-call preview. F3 shows the active quality preset and
+render scale. Bike physics, terrain generation, roads, camera and
+streaming untouched.
 
 ## Tech
 

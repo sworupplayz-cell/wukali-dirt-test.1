@@ -89,6 +89,70 @@ export class UI {
       this.menu.classList.remove('hidden');
     });
 
+    // ---- Graphics quality (Chapter 3C) --------------------------------------
+    this.graphicsOv = $('graphics-overlay');
+    const gfx = game.graphics;
+    const distSteps = [800, 1200, 1800, 2400, 3200];
+    const shadowNames = ['OFF', 'LOW', 'MEDIUM', 'HIGH', 'ULTRA'];
+    const paintGfx = () => {
+      const d = gfx.current;
+      $('gfx-presets').querySelectorAll('button').forEach((b) =>
+        b.classList.toggle('on', b.dataset.preset === gfx.preset));
+      $('gfx-fps-limits').querySelectorAll('button').forEach((b) =>
+        b.classList.toggle('on', +b.dataset.fps === d.fpsLimit));
+      $('gfx-scale').value = Math.round(d.renderScale * 100);
+      $('gfx-scale-val').textContent = `${Math.round(d.renderScale * 100)}%`;
+      $('gfx-dist').value = Math.max(0, distSteps.indexOf(d.renderDist));
+      $('gfx-dist-val').textContent = `${d.renderDist} m`;
+      $('gfx-shadow').value = d.shadows;
+      $('gfx-shadow-val').textContent = shadowNames[d.shadows];
+      $('gfx-veg').value = Math.round(d.vegetation * 100);
+      $('gfx-veg-val').textContent = `${Math.round(d.vegetation * 100)}%`;
+      $('gfx-terrain').querySelectorAll('button').forEach((b) =>
+        b.classList.toggle('on', +b.dataset.v === d.terrainDetail));
+      $('gfx-fog').querySelectorAll('button').forEach((b) =>
+        b.classList.toggle('on', +b.dataset.v === (d.fogQuality > 0 ? 1 : 0)));
+      $('gfx-aa').querySelectorAll('button').forEach((b) =>
+        b.classList.toggle('on', +b.dataset.v === (d.antialias ? 1 : 0)));
+    };
+    $('gfx-presets').querySelectorAll('button').forEach((b) =>
+      b.addEventListener('click', () => { gfx.setPreset(b.dataset.preset); paintGfx(); }));
+    $('gfx-fps-limits').querySelectorAll('button').forEach((b) =>
+      b.addEventListener('click', () => { gfx.set('fpsLimit', +b.dataset.fps); paintGfx(); }));
+    $('gfx-scale').addEventListener('input', () => {
+      gfx.set('renderScale', +$('gfx-scale').value / 100); paintGfx();
+    });
+    $('gfx-dist').addEventListener('input', () => {
+      gfx.set('renderDist', distSteps[+$('gfx-dist').value]); paintGfx();
+    });
+    $('gfx-shadow').addEventListener('input', () => {
+      gfx.set('shadows', +$('gfx-shadow').value); paintGfx();
+    });
+    $('gfx-veg').addEventListener('input', () => {
+      gfx.set('vegetation', +$('gfx-veg').value / 100); paintGfx();
+    });
+    $('gfx-terrain').querySelectorAll('button').forEach((b) =>
+      b.addEventListener('click', () => { gfx.set('terrainDetail', +b.dataset.v); paintGfx(); }));
+    $('gfx-fog').querySelectorAll('button').forEach((b) =>
+      b.addEventListener('click', () => { gfx.set('fogQuality', +b.dataset.v); paintGfx(); }));
+    $('gfx-aa').querySelectorAll('button').forEach((b) =>
+      b.addEventListener('click', () => { gfx.set('antialias', b.dataset.v === '1'); paintGfx(); }));
+    $('btn-graphics').addEventListener('click', () => {
+      this.settingsOv.classList.add('hidden');
+      this.graphicsOv.classList.remove('hidden');
+      paintGfx();
+    });
+    $('btn-graphics-back').addEventListener('click', () => {
+      this.graphicsOv.classList.add('hidden');
+      this.settingsOv.classList.remove('hidden');
+    });
+    // Real-time FPS preview while the graphics panel is open (1 Hz).
+    setInterval(() => {
+      if (this.graphicsOv.classList.contains('hidden')) return;
+      $('gfx-fps').textContent =
+        `FPS: ${game.stats.fps}  \u00B7  DRAW CALLS: ${game.renderer.info.render.calls}`;
+    }, 1000);
+
     // Tilt gracefully falls back to buttons when no sensor responds.
     game.input.onTiltUnavailable = () => {
       applyMode('buttons');
