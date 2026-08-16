@@ -2,23 +2,24 @@
 
 A lightweight, Android-first, 3D off-road dirt-bike game.
 
-**Current status: Chapter 3D — Engine Beta.** The engine milestone build.
-LOADING SCREEN: pressing PLAY now shows a branded loader (progress bar +
-stage labels) while the game preloads the ENTIRE initial tile window
-(11x11 tracked grid incl. the hidden pre-build ring), warms the prop and
-vegetation windows, and runs two warm-up renders (shader compile + buffer
-upload) — gameplay starts with zero pending work and zero first-frame
-hitch (verified: 0 queued builds when the loader closes at 100%). CAMERA:
-spring damping retuned (vertical omega 0.95, slower altitude tracking) —
-measured high-frequency shake is 0.249x the old algorithm (>= 75%
-reduction, CI-verified against a live simulation of the previous camera).
-COLLISION: every prop type now emits proper colliders via per-type LOCAL
-CIRCLE SHAPES rotated with the instance (fence = 5 circles along its 6 m
-run, bridge = 4 rail posts with the deck rideable, stone arch = 2 pillars
-with the gate rideable, lookout = 4 legs, plus signs, benches, markers,
-flags poles, rest logs); solid-body props keep their single-circle bodies
-and scree stays ride-over. Grounding, LOD grow-in, spike-free streaming,
-quality presets and all glitch fixes carry over and are re-verified.
+**Current status: Chapter 3.5 — Camera restoration.** The camera system
+was rebuilt to a stable, documented state. THIRD PERSON: the original
+tight horizontal chase feel (spring omega 9) with ONE clean vertical
+chain — gentle altitude pre-filter (0.65/s, smooth-blended to 6/s past
+2.5-4.5 m of error so drops catch up without threshold flicker) into the
+soft vertical spring (omega 0.95) — measured 72% less high-frequency
+shake than the original camera on the rough reference ride. CLIPPING: the
+desired point pre-compensates spring lag (2.4 m clamp margin, asymmetric
+4/0.9 per-s ease), a mid-ridge guard with a 1.6 m dead zone, plus a
+final-position slew-limited ground envelope + hard floor — minimum
+measured clearance 0.61 m on the rough ride with the anti-clip floor
+never engaging in normal riding. FIRST PERSON: helmet pose now derives
+from a RATE-LIMITED orientation (12/s slerp) so suspension buzz never
+reaches the head; alignment retuned (1.36 m eye height, level view
+through the bars). POV SWITCHING: the blend is now a SMOOTHSTEPPED TIMER
+(C1-continuous, 0.55 s) and the third-person blend reference uses the
+same filtered altitude as the steady camera — toggling mid-ride is
+kick-free (max per-frame velocity change 0.062 m, was 0.331 m).
 
 ## Tech
 

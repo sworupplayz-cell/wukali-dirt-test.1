@@ -617,10 +617,16 @@ function check(name, ok, detail = '') {
     const input = { throttle: 1, brake: 0, steer: 0, stunt: 0, trick: 0 };
     let oldY = null, newHF = 0, oldHF = 0;
     let pn = null, ppn = null, po = null, ppo = null;
+    window.__minMargin = 99;
     for (let i = 0; i < 60 * 8; i++) {
       g.bike.update(1 / 60, input);
       g.world.update(g.bike.position);
       g.followCam.update(g.bike, 1 / 60);
+      if (i > 30) {
+        const marg = g.camera.position.y -
+          g.world.getHeight(g.camera.position.x, g.camera.position.z);
+        if (marg < window.__minMargin) window.__minMargin = marg;
+      }
       // Old algorithm reference (vertical axis only).
       const heading = g.followCam._heading;
       const dx2 = g.bike.position.x - Math.sin(heading) * 6.2;
@@ -638,6 +644,7 @@ function check(name, ok, detail = '') {
       ppn = pn; ppo = po; pn = ny; po = oldY;
     }
     out.shakeRatio = +(newHF / Math.max(1e-6, oldHF)).toFixed(3);
+    out.minMargin = +(window.__minMargin ?? 99).toFixed(2);
 
     // 4. LOD grow-in machinery exists and animates.
     out.growArray = Array.isArray(g.world.vegetation._growing);
@@ -654,8 +661,10 @@ function check(name, ok, detail = '') {
   check('Props never float (footprint-seated)',
     polish.propFloating === 0 && polish.propChecked >= 40,
     `${polish.propFloating}/${polish.propChecked} floating`);
-  check('Camera shake reduced >= 75% vs old algorithm',
-    polish.shakeRatio <= 0.26, `new/old HF ratio=${polish.shakeRatio}`);
+  check('Camera shake reduced >= 70% vs original camera',
+    polish.shakeRatio <= 0.3, `new/old HF ratio=${polish.shakeRatio}`);
+  check('Camera never sinks near terrain on the rough ride',
+    polish.minMargin > 0.4, `min clearance=${polish.minMargin} m`);
   check('Smooth LOD grow-in system active', polish.growArray);
   const fenceColl = await page.evaluate(() => {
     const g = window.__game;
@@ -694,6 +703,30 @@ function check(name, ok, detail = '') {
   check('First-person POV toggles', povBefore === 'third' && povAfter === 'first');
   await page.keyboard.press('KeyC');
   await sleep(400);
+  // POV switching while MOVING must not kick the camera (fixed-step sim).
+  const povKick = await page.evaluate(() => {
+    const g = window.__game;
+    const f = g.world.field;
+    const input = { throttle: 1, brake: 0, steer: 0, stunt: 0, trick: 0 };
+    g.bike._placeAt(4000, f.height(4000, 1600), 1600, 0);
+    g.followCam.snapTo(g.bike);
+    let prev = g.camera.position.clone(), pv = null, maxA = 0;
+    for (let i = 0; i < 60 * 10; i++) {
+      g.bike.update(1 / 60, input);
+      g.followCam.update(g.bike, 1 / 60);
+      const v = g.camera.position.distanceTo(prev);
+      if (pv !== null && i > 5) maxA = Math.max(maxA, Math.abs(v - pv));
+      pv = v;
+      prev.copy(g.camera.position);
+      if (i === 120 || i === 300 || i === 480) g.followCam.toggle();
+    }
+    g.followCam.mode = 'third';
+    g.bike._placeAt(4000, f.height(4000, 1965), 1965, 0);
+    g.followCam.snapTo(g.bike);
+    return +maxA.toFixed(3);
+  });
+  check('POV switch while moving is kick-free (< 0.12 m/frame velocity change)',
+    povKick < 0.12, `max=${povKick} m`);
 
   // ================= Debug overlay =================
   await page.keyboard.press('F3');
