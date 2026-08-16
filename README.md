@@ -2,20 +2,25 @@
 
 A lightweight, Android-first, 3D off-road dirt-bike game.
 
-**Current status: Phase 3.1 — Open valley spawn redesign.** The spawn
-mountain bowl is gone. Rider's Meadow (r 600 m, elevation ~165 m) now sits
-in an OPEN VALLEY: no near-horizon wall exceeds ~4.5 deg in any direction,
-the nearest serious mountain is 1.4 km away, and the massifs are suppressed
-entirely within 1 km of spawn (full height only beyond ~1.8 km). Mountain
-distribution is directional: North = Northwall (major range), North-East =
-Kanjiro Massif (highest peaks, ~2180 m), East = Eastguard (the pass/canyon
-region), South = grasslands & lakes (two extra lakes on the South Arm),
-South-West = boosted rolling hills, West = wide low valleys. The four
-meadow roads lead N (alpine), E (canyon passes), S (lakes), W (rolling
-countryside). Road blending was rebuilt as a saturating weighted blend —
-continuous everywhere, no more Voronoi/eligibility walls — and trail
-kickers fade out near main roads. All handcrafted meadow features remain:
-lake, cabin, signpost, benches, practice jump, 4-way crossroads.
+**Current status: Chapter 3A — Handcrafted road network.** Every road is
+now a named, hand-designed spline and riding them is the game. The network:
+MEADOW LOOP (7 m beginner ring around spawn, gentle 12-gon curves), EAGLE
+PASS ROAD (1.6 km marquee switchback climb, 11+ hairpins, <= 10 deg),
+CANYON TRAIL (2.5 m technical singletrack through the Eastguard canyon to
+the Stone Arch), GLACIER ROUTE (high-altitude crest traverse at ~1000 m
+along the Northwall between two saddles), RIDGE SHORTCUT (hidden connector
+over the NW hill crest), plus the Horizon Loop, four meadow arms and five
+more passes. Rules enforced by construction: every road <= 10 deg, hairpins
+ONLY on passes, min curve radius 18 m elsewhere. Every named road ends at a
+destination (Eagle Eyrie Lookout, Hermit's Cabin, Stone Arch, Prayer Flag
+Hill, Twin Lakes Rest, Rider's Meadow) — no unrewarded dead ends. Roadside
+micro-props (wooden fences, trail markers + the existing signs/flags/
+benches/bridges) instance along the network every ~300 m. Graphics polish:
+grass patch/tussock variation, noise-broken dirt road edges, rock strata,
+large-scale ambient tint (all in the shared vertex palette), FogExp2
+atmospheric gradient. Anti-popping: tile window grew to 9x9 (~560 m) so
+tiles materialize inside the haze over the color-matched far backdrop. F3
+adds road NAME + progress %, road slope and nearest landmark.
 
 ## Tech
 

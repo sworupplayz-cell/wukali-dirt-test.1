@@ -110,9 +110,71 @@ function check(name, ok, detail = '') {
   check('Highest peak ~2200 m', terrain.maxH > 2000 && terrain.maxH <= 2300, `${terrain.maxH} m`);
   check('Valley band 80-250 m (no holes)',
     terrain.minH > 70 && terrain.minH < 260, `min=${terrain.minH} m`);
-  check('Road network: 5 main roads + 6 passes, > 25 km',
-    st.mainRoads === 5 && st.passes === 6 && st.roadKm > 25,
+  check('Road network: 6 main roads + 6 passes + 3 named trails, > 30 km',
+    st.mainRoads === 6 && st.passes === 6 && st.roadKm > 30,
     `main=${st.mainKm} km passes=${st.passKm} km total=${st.roadKm} km, vp=${st.viewpoints}`);
+
+  // ---- Chapter 3A: named handcrafted roads ---------------------------------
+  const ch3a = await page.evaluate(() => {
+    const f = window.__game.world.field;
+    const lf = f.landforms;
+    // Per-named-road worst surface grade.
+    const agg = new Map();
+    for (const [rid, meta] of lf.roadMeta) {
+      let worst = agg.get(meta.name) || 0;
+      for (let i = meta.i0; i < meta.i0 + meta.n - 1; i++) {
+        if (lf._rid[i + 1] !== rid) break;
+        const ds = Math.hypot(lf._rx[i + 1] - lf._rx[i], lf._rz[i + 1] - lf._rz[i]);
+        if (ds < 1) continue;
+        const g = Math.abs(f.height(lf._rx[i + 1], lf._rz[i + 1]) - f.height(lf._rx[i], lf._rz[i])) / ds;
+        if (g > worst) worst = g;
+      }
+      agg.set(meta.name, worst);
+    }
+    let worstDeg = 0, worstName = '';
+    for (const [n, g] of agg) {
+      const deg = Math.atan(g) * 180 / Math.PI;
+      if (deg > worstDeg) { worstDeg = deg; worstName = n; }
+    }
+    // Hairpins: only on pass roads; min curve radius off-pass.
+    let hairpinsPass = 0, sharpOffPass = 0;
+    for (let i = 2; i < lf._rx.length - 2; i++) {
+      if (lf._rid[i - 2] !== lf._rid[i + 2]) continue;
+      const v1x = lf._rx[i] - lf._rx[i - 2], v1z = lf._rz[i] - lf._rz[i - 2];
+      const v2x = lf._rx[i + 2] - lf._rx[i], v2z = lf._rz[i + 2] - lf._rz[i];
+      const d1 = Math.hypot(v1x, v1z), d2 = Math.hypot(v2x, v2z);
+      if (d1 < 1 || d2 < 1) continue;
+      if ((v1x * v2x + v1z * v2z) / (d1 * d2) < -0.1) {
+        if (lf._rt[i] === 2) hairpinsPass++;
+        else sharpOffPass++;
+      }
+    }
+    const names = new Set([...lf.roadMeta.values()].map((m) => m.name));
+    return {
+      worstDeg: +worstDeg.toFixed(1), worstName, hairpinsPass, sharpOffPass,
+      hasAll: ['Meadow Loop', 'Eagle Pass Road', 'Canyon Trail', 'Glacier Route', 'Ridge Shortcut']
+        .every((n) => names.has(n)),
+      eagleLen: lf.passes[0].lengthM,
+      destinations: lf.destinations.length,
+      roadAtMeadowLoop: lf.roadAt(4000, 1180),
+      nearestDest: lf.nearestDestination(3200, 245),
+    };
+  });
+  check('All 5 named roads exist (Meadow Loop / Eagle Pass / Canyon / Glacier / Ridge)',
+    ch3a.hasAll);
+  check('Every road <= 10 deg', ch3a.worstDeg <= 10.05,
+    `worst=${ch3a.worstDeg} deg on ${ch3a.worstName}`);
+  check('Hairpins only on mountain passes', ch3a.hairpinsPass >= 8 && ch3a.sharpOffPass === 0,
+    `${ch3a.hairpinsPass} pass hairpins, ${ch3a.sharpOffPass} off-pass`);
+  check('Eagle Pass Road is a real climb (>= 1.2 km)', ch3a.eagleLen >= 1200,
+    `${ch3a.eagleLen} m`);
+  check('6 destinations registered', ch3a.destinations === 6);
+  check('roadAt() names the Meadow Loop',
+    !!ch3a.roadAtMeadowLoop && ch3a.roadAtMeadowLoop.name === 'Meadow Loop',
+    JSON.stringify(ch3a.roadAtMeadowLoop));
+  check('nearestDestination() finds Eagle Eyrie at the saddle',
+    !!ch3a.nearestDest && ch3a.nearestDest.name === 'Eagle Eyrie Lookout',
+    JSON.stringify(ch3a.nearestDest && ch3a.nearestDest.name));
   check('Viewpoints computed on roads (>= 8)', st.viewpoints >= 8, `${st.viewpoints}`);
 
   // Road grades: main <= 10 deg, pass <= 12 deg.
@@ -146,7 +208,7 @@ function check(name, ok, detail = '') {
     };
   });
   check('Main roads <= 10 deg', roads.mainDeg <= 10, `worst=${roads.mainDeg} deg`);
-  check('Pass roads <= 12 deg', roads.passDeg <= 12.05, `worst=${roads.passDeg} deg`);
+  check('Pass roads <= 10 deg (Chapter 3A cap)', roads.passDeg <= 10.05, `worst=${roads.passDeg} deg`);
 
   // ================= Seams =================
   await page.click('#btn-play');
@@ -434,8 +496,9 @@ function check(name, ok, detail = '') {
     text: document.getElementById('debug-overlay').textContent,
   }));
   check('F3 shows debug overlay', !dbg.hidden);
-  check('Overlay shows road type / elevation / sector / loaded / slope',
-    /ROAD (MAIN|PASS|SPIRAL|TRAIL|-)/.test(dbg.text) && /ELEVATION -?[\d.]+ m/.test(dbg.text) &&
+  check('Overlay shows road name/progress, slope, landmark, sector, loaded',
+    /ROAD .+/.test(dbg.text) && /RD SLOPE/.test(dbg.text) &&
+    /LANDMARK .+/.test(dbg.text) && /ELEVATION -?[\d.]+ m/.test(dbg.text) &&
     /SECTOR \(\d+,\d+\)/.test(dbg.text) && /LOADED \d+/.test(dbg.text) &&
     /SLOPE [\d.]+%/.test(dbg.text) && /FPS \d+/.test(dbg.text),
     JSON.stringify(dbg.text));
@@ -513,7 +576,7 @@ function check(name, ok, detail = '') {
   s = await state();
   check('FPS healthy in headless run (CPU rasterizer)', s.fps > 11, `fps=${s.fps}`);
   const calls = await page.evaluate(() => window.__game.renderer.info.render.calls);
-  check('Draw calls bounded', calls < 90, `calls=${calls}`);
+  check('Draw calls bounded', calls < 110, `calls=${calls}`);
   const mem = await page.metrics();
   console.log('HEAP MB', Math.round(mem.JSHeapUsedSize / 1048576));
   check('No console errors or warnings', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));

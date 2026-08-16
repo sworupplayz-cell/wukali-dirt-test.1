@@ -55,7 +55,7 @@ export class FarTerrain {
             pos[v * 3] = wx;
             pos[v * 3 + 1] = info.h - 1.0; // sit just under the near tiles
             pos[v * 3 + 2] = wz;
-            colorFor(info, rgb);
+            colorFor(info, rgb, wx, wz);
             col[v * 3] = rgb[0]; col[v * 3 + 1] = rgb[1]; col[v * 3 + 2] = rgb[2];
           }
         }

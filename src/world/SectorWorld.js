@@ -182,6 +182,16 @@ export class SectorWorld {
     return this.field.landforms.nearestViewpoint(x, z);
   }
 
+  /** Named road under the bike: { name, type, progress } or null (F3). */
+  roadAt(x, z) {
+    return this.field.landforms.roadAt(x, z);
+  }
+
+  /** Nearest destination landmark (F3 + tests). */
+  nearestDestination(x, z) {
+    return this.field.landforms.nearestDestination(x, z);
+  }
+
   // ---- Streaming ------------------------------------------------------------
 
   /** Per-frame: sector window (logical) + terrain tile window (render). */
@@ -222,12 +232,13 @@ export class SectorWorld {
   }
 
   _buildLighting(scene) {
-    const sky = new THREE.Color(0x7ec4e8);
+    // Chapter 3A: hazier valley sky + exponential-squared fog. FogExp2
+    // reads as a smooth atmospheric GRADIENT (near ground crisp, ranges
+    // increasingly hazy with distance) instead of linear fog's flat ramp,
+    // and it fully hides the far-terrain discard ring near the camera.
+    const sky = new THREE.Color(0x9cc8e4);
     scene.background = sky;
-    // Phase 3: fog opens up to ~7 km so the mountain ranges read as a
-    // continent; the near/far terrain handoff (385-437 m) hides inside
-    // the fog ramp's start.
-    scene.fog = new THREE.Fog(sky, 300, 7000);
+    scene.fog = new THREE.FogExp2(sky, 0.00042);
     scene.add(new THREE.HemisphereLight(0xd4ebff, 0x7d6a44, 0.92));
     const sun = new THREE.DirectionalLight(0xffedc9, 1.22);
     sun.position.set(60, 90, 30);

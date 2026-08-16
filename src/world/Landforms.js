@@ -97,6 +97,9 @@ const RANGES = [
 const CREST_F = 0.45, SKIRT_F = 0.55, SKIRT_W = 2.6;
 
 // ---- 1. Main roads (authored FIRST — gameplay skeleton) --------------------
+// Chapter 3A: every road is a named, handcrafted spline. The Meadow Loop
+// ring passes EXACTLY through the four arm lines (its cardinal control
+// points sit on them), so the crossings become natural junctions.
 const MAIN_ROUTES = [
   { name: 'Horizon Loop', pts: [
     [1000, 1200], [2200, 1050], [4000, 980], [5800, 1050], [7000, 1200],
@@ -106,19 +109,44 @@ const MAIN_ROUTES = [
   { name: 'South Arm', calm: true, pts: [[4000, 2000], [4000, 2500], [4000, 3020]] },
   { name: 'West Arm', calm: true, pts: [[850, 2000], [2400, 2000], [4000, 2000]] },
   { name: 'East Arm', calm: true, pts: [[4000, 2000], [5600, 2000], [7150, 2000]] },
+  // Beginner scenic ring around Rider's Meadow (r 820, 12-gon: gentle
+  // ~30 deg bends, curve radius >> 18 m). Junctions at N/E/S/W vertices.
+  { name: 'Meadow Loop', calm: true, pts: [
+    [4000, 1180], [4410, 1290], [4710, 1590], [4820, 2000], [4710, 2410],
+    [4410, 2710], [4000, 2820], [3590, 2710], [3290, 2410], [3180, 2000],
+    [3290, 1590], [3590, 1290], [4000, 1180]] },
+];
+
+// Named singletrack routes laid AFTER the passes (they pin to them).
+//   Glacier Route  — high-altitude crest traverse along the Northwall
+//                    between the two pass saddles: long flowing corners,
+//                    a viewpoint every few bends, ~1000 m elevation.
+//   Canyon Trail   — narrow technical braid through the Eastguard canyon
+//                    beside the East Arm; rock formations + Stone Arch.
+//   Ridge Shortcut — hidden connector over the hill crest between the
+//                    Meadow Loop NW and the Horizon Loop NW.
+const NAMED_TRAILS = [
+  { name: 'Glacier Route', w: 2.5, grade: 0.115, type: 2, wander: 0.5, pts: [
+    [3200, 240], [3500, 330], [3800, 380], [4100, 340], [4350, 280]] },
+  { name: 'Canyon Trail', w: 1.25, grade: 0.175, type: 4, wander: 0.8, pts: [
+    [6650, 2005], [6780, 2110], [6950, 2150], [7080, 2090], [7130, 2010]] },
+  { name: 'Ridge Shortcut', w: 1.25, grade: 0.175, type: 4, wander: 1, pts: [
+    [3590, 1290], [3350, 1210], [3100, 1150], [2850, 1080], [2600, 1030]] },
 ];
 
 // ---- 5. Pass roads: [rangeIdx, gapIdx] saddles carrying switchbacks --------
 // East = the pass region (both Eastguard saddles), plus Northwall and the
-// Kanjiro Massif approaches.
+// Kanjiro Massif approaches. The Mistral Horn / Sorren Dome crossing is
+// the marquee climb: EAGLE PASS ROAD.
 const PASS_SADDLES = [[0, 1], [0, 2], [1, 0], [1, 1], [2, 0], [2, 1]];
+const PASS_NAMES = { '01': 'Eagle Pass Road' };
 
 // Road hierarchy geometry. Half-widths of the flat bed:
-//   MAIN 3.5 (7 m), PASS 2.5 (5 m); TRAIL (2.5 m) lives in TerrainField.
+//   MAIN 3.5 (7 m), PASS 2.5 (5 m), TRAIL 1.25 (2.5 m).
 const W_MAIN = 3.5;
 const W_PASS = 2.5;
-const MAIN_GRADE = 0.11;   // 6.3 deg — well under the 10 deg main-road cap
-const PASS_GRADE = 0.175;  // ~10 deg construction; surface stays <= 12 deg
+const MAIN_GRADE = 0.11;   // 6.3 deg — well under the 10 deg road cap
+const PASS_GRADE = 0.138;  // 7.9 deg construction => surface stays <= 10 deg
 const ROAD_FADE_MAX = 110;
 const PASS_WAVE = 340;
 const RD_STEP = 16;
@@ -275,14 +303,20 @@ export class Landforms {
     this._rx = []; this._rz = []; this._re = [];
     this._rid = []; this._rw = []; this._rt = [];
     this._hash = new Map();
+    this.roadMeta = new Map(); // rid -> { name, i0, n, type }
     let roadId = 0, totalM = 0;
-    this._mainM = 0; this._passM = 0;
+    this._mainM = 0; this._passM = 0; this._trailM = 0;
 
-    // 1. Main roads: the loop first, then the four meadow arms (arms pin
-    // their junction elevations to the already-laid loop / each other).
+    // 1. Main roads: the loop first, then the meadow arms and the Meadow
+    // Loop ring (later routes pin their junction elevations to roads
+    // already laid).
     for (const route of MAIN_ROUTES) {
       const id = roadId++;
-      const lenM = this._layMainRoad(raw, route, id);
+      const i0 = this._rx.length;
+      const lenM = this._laySpline(raw, route.pts, id, {
+        w: W_MAIN, grade: MAIN_GRADE, type: 1, calm: route.calm, wander: 1,
+      });
+      this.roadMeta.set(id, { name: route.name, i0, n: this._rx.length - i0, type: 1 });
       this.mainRoads.push({ name: route.name, roadId: id, lengthM: lenM });
       this._mainM += lenM;
       totalM += lenM;
@@ -297,32 +331,116 @@ export class Landforms {
       const vx = (b[0] - a[0]) / tl, vz = (b[1] - a[1]) / tl;
       const ux = -vz, uz = vx;
       const saddleE = raw(sx, sz);
+      const passName = PASS_NAMES[`${ri}${gi}`] || `${a[4]} / ${b[4]} Pass`;
       let lenM = 0;
       const flankIds = [];
       for (const side of [1, -1]) {
         flankIds.push(roadId);
+        const i0 = this._rx.length;
         lenM += this._walkSwitchbacks(raw, sx, sz, saddleE,
           ux * side, uz * side, vx, vz, roadId);
+        this.roadMeta.set(roadId, { name: passName, i0, n: this._rx.length - i0, type: 2 });
         roadId++;
       }
       this.passes.push({
-        id: `${r.id}${gi}-${r.id}${gi + 1}`, name: `${a[4]} / ${b[4]} Pass`,
+        id: `${r.id}${gi}-${r.id}${gi + 1}`, name: passName,
         sx, sz, elev: +saddleE.toFixed(0), lengthM: lenM, roadId: flankIds[0], flankIds,
       });
       this._passM += lenM;
       totalM += lenM;
     }
+
+    // 6. Named singletrack (Glacier Route / Canyon Trail / Ridge
+    // Shortcut) — laid last so both endpoints pin to the network.
+    this.namedTrails = [];
+    for (const t of NAMED_TRAILS) {
+      const id = roadId++;
+      const i0 = this._rx.length;
+      const lenM = this._laySpline(raw, t.pts, id, {
+        w: t.w, grade: t.grade, type: t.type, wander: t.wander,
+      });
+      this.roadMeta.set(id, { name: t.name, i0, n: this._rx.length - i0, type: t.type });
+      this.namedTrails.push({ name: t.name, roadId: id, lengthM: lenM });
+      this._trailM += lenM;
+      totalM += lenM;
+    }
     this.roadKm = totalM / 1000;
+
+    this._initDestinations(raw);
   }
 
   /**
-   * Lay one main road: resample at RD_STEP with a flowing lateral wander
-   * (suppressed near Rider's Meadow for the calm arms), grade-clamp the
-   * terrain-following elevation both directions, smooth, pin junction
-   * endpoints to already-laid roads, and close loops seamlessly.
+   * Destinations (Chapter 3A): every named road terminates at (or passes)
+   * a rewarded landmark — no dead ends without a payoff. Props renders
+   * them; F3 names the nearest one.
    */
-  _layMainRoad(raw, route, roadId) {
-    const pts = route.pts;
+  _initDestinations(raw) {
+    const eagle = this.passes[0]; // Eagle Pass saddle
+    const glacierEnd = this.passes[1]; // N2-N3 saddle (Glacier Route east end)
+    this.destinations = [
+      { id: 'D1', name: 'Eagle Eyrie Lookout', x: eagle.sx + 14, z: eagle.sz + 10,
+        kind: 'lookout', props: ['lookout', 'flags', 'bench'] },
+      { id: 'D2', name: "Hermit's Cabin", x: glacierEnd.sx + 16, z: glacierEnd.sz + 12,
+        kind: 'cabin', props: ['cabin', 'sign'] },
+      { id: 'D3', name: 'Stone Arch', x: 6950, z: 2165,
+        kind: 'arch', props: ['arch', 'rocks'] },
+      { id: 'D4', name: 'Prayer Flag Hill', x: 3100, z: 1128,
+        kind: 'flags', props: ['flags', 'flags', 'bench'] },
+      { id: 'D5', name: 'Twin Lakes Rest', x: 3620, z: 2985,
+        kind: 'rest', props: ['rest', 'bench', 'sign'] },
+      { id: 'D6', name: "Rider's Meadow", x: MEADOW.x, z: MEADOW.z,
+        kind: 'meadow', props: [] }, // fixtures already handcrafted
+    ];
+  }
+
+  /** Nearest destination landmark to (x,z) — F3 + tests. */
+  nearestDestination(x, z) {
+    let best = null, bd = Infinity;
+    for (const d of this.destinations) {
+      const dd = Math.hypot(x - d.x, z - d.z);
+      if (dd < bd) { bd = dd; best = d; }
+    }
+    return best ? { ...best, dist: +bd.toFixed(0) } : null;
+  }
+
+  /**
+   * Road under (x,z) within its bed/apron: { name, type, progress } or
+   * null. Progress is the fraction along the named road (F3).
+   */
+  roadAt(x, z) {
+    const cx = Math.floor(x / RD_CELL), cz = Math.floor(z / RD_CELL);
+    let bi = -1, bd2 = 30 * 30;
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const arr = this._hash.get(`${cx + dx},${cz + dz}`);
+        if (!arr) continue;
+        for (let k = 0; k < arr.length; k++) {
+          const i = arr[k];
+          const ddx = x - this._rx[i], ddz = z - this._rz[i];
+          const d2 = ddx * ddx + ddz * ddz;
+          if (d2 < bd2) { bd2 = d2; bi = i; }
+        }
+      }
+    }
+    if (bi < 0) return null;
+    const meta = this.roadMeta.get(this._rid[bi]);
+    if (!meta) return null;
+    return {
+      name: meta.name,
+      type: this._rt[bi],
+      progress: meta.n > 1 ? +((bi - meta.i0) / (meta.n - 1)).toFixed(2) : 0,
+    };
+  }
+
+  /**
+   * Lay one named road spline: resample at RD_STEP with a flowing
+   * lateral wander scaled by opts.wander (suppressed near Rider's Meadow
+   * for calm arms), grade-clamp the terrain-following elevation both
+   * directions to opts.grade, smooth, pin junction endpoints to
+   * already-laid roads, and close loops seamlessly.
+   */
+  _laySpline(raw, pts, roadId, opts) {
+    const grade = opts.grade, halfW = opts.w, type = opts.type;
     const closed = pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1];
     const X = [], Z = [];
     for (let i = 0; i < pts.length - 1; i++) {
@@ -333,11 +451,11 @@ export class Landforms {
       const n = Math.max(1, Math.round(L / RD_STEP));
       for (let k = (i === 0 ? 0 : 1); k <= n; k++) {
         const t = k / n;
-        let wob = Math.sin((i + t) * 2.4 + roadId) * 26 +
-                  Math.sin((i + t) * 5.9 + roadId * 2.7) * 11;
+        let wob = (Math.sin((i + t) * 2.4 + roadId) * 26 +
+                  Math.sin((i + t) * 5.9 + roadId * 2.7) * 11) * (opts.wander ?? 1);
         wob *= Math.sin(Math.PI * t); // stay put at control points
         const bx = a[0] + (b[0] - a[0]) * t, bz = a[1] + (b[1] - a[1]) * t;
-        if (route.calm) {
+        if (opts.calm) {
           const dm = Math.hypot(bx - MEADOW.x, bz - MEADOW.z);
           wob *= Math.min(1, Math.max(0, (dm - 450) / 300));
         }
@@ -353,11 +471,11 @@ export class Landforms {
     if (eEnd !== null) E[E.length - 1] = eEnd;
     for (let i = 1; i < E.length; i++) {
       const ds = Math.hypot(X[i] - X[i - 1], Z[i] - Z[i - 1]);
-      E[i] = Math.max(E[i - 1] - MAIN_GRADE * ds, Math.min(E[i - 1] + MAIN_GRADE * ds, E[i]));
+      E[i] = Math.max(E[i - 1] - grade * ds, Math.min(E[i - 1] + grade * ds, E[i]));
     }
     for (let i = E.length - 2; i >= 0; i--) {
       const ds = Math.hypot(X[i + 1] - X[i], Z[i + 1] - Z[i]);
-      E[i] = Math.max(E[i + 1] - MAIN_GRADE * ds, Math.min(E[i + 1] + MAIN_GRADE * ds, E[i]));
+      E[i] = Math.max(E[i + 1] - grade * ds, Math.min(E[i + 1] + grade * ds, E[i]));
     }
     for (let p = 0; p < 2; p++) {
       for (let i = 1; i < E.length - 1; i++) E[i] = (E[i - 1] + 2 * E[i] + E[i + 1]) / 4;
@@ -387,7 +505,7 @@ export class Landforms {
     }
     let len = 0;
     for (let i = 0; i < X.length; i++) {
-      this._pushVertex(X[i], Z[i], E[i], roadId, W_MAIN, 1);
+      this._pushVertex(X[i], Z[i], E[i], roadId, halfW, type);
       if (i > 0) len += Math.hypot(X[i] - X[i - 1], Z[i] - Z[i - 1]);
     }
     return len;
@@ -425,18 +543,21 @@ export class Landforms {
       const gStep = PASS_GRADE * RD_STEP * (0.15 + 0.85 * turn * turn);
       let eN = Math.max(e - gStep, Math.min(e + gStep, eT));
       const cur0 = this._rx.length - 1;
-      for (let b2 = 4; b2 <= 22; b2++) {
+      // Elbow clamp window must cover a FULL switchback leg (PASS_WAVE/2
+      // of arc plus the fold), so adjacent legs always get clamped and
+      // never trip the self-conflict check between them.
+      for (let b2 = 4; b2 <= 30; b2++) {
         const i2 = cur0 - b2;
         if (i2 < 0 || this._rid[i2] !== roadId) break;
         const dpx = nx2 - this._rx[i2], dpz = nz2 - this._rz[i2];
         const dp = Math.hypot(dpx, dpz);
         if (dp < 60) {
-          const lim = Math.max(1.0, 0.19 * dp);
+          const lim = Math.max(0.8, 0.155 * dp);
           const ei = this._re[i2];
           eN = Math.max(ei - lim, Math.min(ei + lim, eN));
         }
       }
-      const gCap = Math.max(0.10, PASS_GRADE * (0.3 + 0.7 * turn)) * RD_STEP;
+      const gCap = Math.max(0.08, PASS_GRADE * (0.3 + 0.7 * turn)) * RD_STEP;
       eN = Math.max(e - gCap, Math.min(e + gCap, eN));
       if (this._conflict(nx2, nz2, eN, roadId)) break;
       x = nx2; z = nz2; e = eN;
@@ -489,7 +610,10 @@ export class Landforms {
           const d = Math.sqrt(d2);
           if (this._rid[i] === roadId) {
             const arc = (cur - i) * RD_STEP;
-            if (arc < 8 * RD_STEP || d > 0.35 * arc) continue;
+            // Own path: within the elbow-clamp window (30 verts) the
+            // clamp guarantees the beds stay joined — never a conflict;
+            // beyond it only a true LOOP-BACK counts.
+            if (arc <= 30 * RD_STEP || d > 0.35 * arc) continue;
           }
           const dE = Math.abs(e - this._re[i]);
           if (dE > Math.max(3, 0.30 * d)) return true;

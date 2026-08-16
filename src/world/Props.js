@@ -22,7 +22,8 @@ import { hash01, mulberry32, hashInt } from './noise.js';
  * existing prop-collider system); flags/signs/rest spots are ride-through.
  */
 
-const CAP = { flags: 48, sign: 48, rocks: 64, lookout: 24, cabin: 32, cave: 24, rest: 48, bench: 32, bridge: 16 };
+const CAP = { flags: 48, sign: 48, rocks: 64, lookout: 24, cabin: 32, cave: 24,
+  rest: 48, bench: 32, bridge: 16, arch: 8, fence: 96, marker: 64 };
 
 export class Props {
   constructor(scene, field) {
@@ -43,6 +44,9 @@ export class Props {
       rest: { geo: buildRest(), max: CAP.rest, mat, coll: 0 },
       bench: { geo: buildBench(), max: CAP.bench, mat, coll: 0 },
       bridge: { geo: buildBridge(), max: CAP.bridge, mat, coll: 0 },
+      arch: { geo: buildArch(), max: CAP.arch, mat, coll: 0 }, // ride-through!
+      fence: { geo: buildFence(), max: CAP.fence, mat, coll: 0 },
+      marker: { geo: buildMarker(), max: CAP.marker, mat, coll: 0 },
     };
     this.meshes = {};
     for (const [k, t] of Object.entries(this.types)) {
@@ -76,6 +80,43 @@ export class Props {
     for (const fx of lf.meadowFixtures) {
       if (fx.x < ox || fx.x >= ox + 500 || fx.z < oz || fx.z >= oz + 500) continue;
       list.push({ t: fx.t, x: fx.x, z: fx.z, y: field.height(fx.x, fx.z), yaw: fx.yaw, s: fx.s });
+    }
+
+    // Destination landmarks (Chapter 3A): each named road's reward.
+    if (lf.destinations) {
+      for (const d of lf.destinations) {
+        if (d.x < ox || d.x >= ox + 500 || d.z < oz || d.z >= oz + 500) continue;
+        d.props.forEach((t, n) => {
+          const a = hash01(d.x | 0, (d.z | 0) + n * 37, 13) * Math.PI * 2;
+          const r2 = n === 0 ? 0 : 7 + n * 5;
+          const px = d.x + Math.cos(a) * r2, pz = d.z + Math.sin(a) * r2;
+          list.push({ t, x: px, z: pz, y: field.height(px, pz), yaw: a + 1.1, s: t === 'arch' ? 1.4 : 1 });
+        });
+      }
+    }
+
+    // Road-side micro details (Chapter 3A): fences on outer curve edges,
+    // trail markers on singletrack, spaced along the laid road vertices
+    // that fall inside this sector (deterministic per-vertex hash).
+    if (lf._rx) {
+      for (let i = 0; i < lf._rx.length; i += 6) {
+        const rx = lf._rx[i], rz = lf._rz[i];
+        if (rx < ox || rx >= ox + 500 || rz < oz || rz >= oz + 500) continue;
+        const h = hash01(i, 0, 0x33aa);
+        if (h > 0.34) continue; // ~1 per 280 m of road
+        const j = Math.min(lf._rx.length - 1, i + 1);
+        if (lf._rid[j] !== lf._rid[i]) continue;
+        const dx2 = lf._rx[j] - rx, dz2 = lf._rz[j] - rz;
+        const l2 = Math.hypot(dx2, dz2);
+        if (l2 < 1) continue;
+        const nx2 = -dz2 / l2, nz2 = dx2 / l2;
+        const side = h < 0.17 ? 1 : -1;
+        const off = lf._rw[i] + 2.2;
+        const px = rx + nx2 * off * side, pz = rz + nz2 * off * side;
+        const t = lf._rt[i] === 4 ? 'marker' : (h * 3) % 1 < 0.6 ? 'fence' : 'marker';
+        list.push({ t, x: px, z: pz, y: field.height(px, pz),
+          yaw: Math.atan2(dx2, dz2), s: 1 });
+      }
     }
 
     // Viewpoints in this sector: lookout platform + flags beside the road.
@@ -286,6 +327,37 @@ function buildBridge() {
       parts.push(box(0.14, 0.52, 0.14, zx, 0.26, zz, 0.4, 0.29, 0.18));
     }
   }
+  return mergeGeometries(parts);
+}
+
+/** Stone arch: two rough pillars + capstones (wide enough to ride through). */
+function buildArch() {
+  const parts = [];
+  for (const sx of [-3.2, 3.2]) {
+    parts.push(box(1.5, 4.6, 1.7, sx, 2.3, 0, 0.46, 0.43, 0.39));
+    parts.push(box(1.9, 0.8, 2.1, sx, 4.7, 0, 0.43, 0.40, 0.36));
+  }
+  parts.push(box(7.6, 1.0, 1.8, 0, 5.4, 0, 0.48, 0.45, 0.41));  // lintel
+  parts.push(box(2.6, 0.7, 1.5, 0, 6.1, 0, 0.44, 0.41, 0.37));  // crown
+  return mergeGeometries(parts);
+}
+
+/** Wooden fence: 3 posts + 2 rails, one 6 m run. */
+function buildFence() {
+  const parts = [];
+  for (const px of [-3, 0, 3]) {
+    parts.push(box(0.14, 1.05, 0.14, px, 0.52, 0, 0.4, 0.3, 0.19));
+  }
+  parts.push(box(6.2, 0.12, 0.09, 0, 0.88, 0, 0.46, 0.35, 0.22));
+  parts.push(box(6.2, 0.12, 0.09, 0, 0.5, 0, 0.44, 0.33, 0.21));
+  return mergeGeometries(parts);
+}
+
+/** Trail marker: short post with a painted top band. */
+function buildMarker() {
+  const parts = [];
+  parts.push(box(0.14, 1.15, 0.14, 0, 0.57, 0, 0.42, 0.32, 0.2));
+  parts.push(box(0.16, 0.18, 0.16, 0, 1.2, 0, 0.9, 0.35, 0.15)); // red band
   return mergeGeometries(parts);
 }
 

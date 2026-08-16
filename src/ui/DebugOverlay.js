@@ -42,7 +42,9 @@ export class DebugOverlay {
     const slope = g.world.slopeAt ? g.world.slopeAt(p.x, p.z) : 0;
     const peak = g.world.peakAt ? g.world.peakAt(p.x, p.z) : null;
     const road = g.world.roadInfoAt ? g.world.roadInfoAt(p.x, p.z) : null;
+    const named = g.world.roadAt ? g.world.roadAt(p.x, p.z) : null;
     const vp = g.world.nearestViewpoint ? g.world.nearestViewpoint(p.x, p.z) : null;
+    const lm = g.world.nearestDestination ? g.world.nearestDestination(p.x, p.z) : null;
     this.el.textContent =
       `FPS ${g.stats.fps}\n` +
       `X ${p.x.toFixed(1)}  Z ${p.z.toFixed(1)}\n` +
@@ -51,7 +53,10 @@ export class DebugOverlay {
       `ELEVATION ${groundH.toFixed(1)} m\n` +
       `ALTITUDE ${Math.max(0, p.y - groundH).toFixed(2)} m\n` +
       `SLOPE ${(slope * 100).toFixed(0)}%  (${(Math.atan(slope) * 180 / Math.PI).toFixed(1)}\u00B0)\n` +
-      `ROAD ${road ? road.type : '-'}  RD SLOPE ${road ? road.slope + '%' : '-'}\n` +
+      `ROAD ${named ? named.name : road ? road.type : '-'}` +
+      `${named ? `  ${Math.round(named.progress * 100)}%` : ''}\n` +
+      `RD SLOPE ${road ? road.slope + '%' : '-'}\n` +
+      `LANDMARK ${lm ? `${lm.name} ${lm.dist} m` : '-'}\n` +
       `VIEWPOINT ${vp ? `${vp.id} ${vp.dist} m` : '-'}\n` +
       (peak
         ? `PEAK ${peak.name}  [${peak.id}]\nRANGE ${peak.chain}\n`

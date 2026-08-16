@@ -31,8 +31,12 @@ import { colorFor } from './palette.js';
 export const TILE = 125;
 const RES = 32;              // quads per side -> 3.90625 m cells (exact binary)
 const CELL = TILE / RES;
-const RADIUS = 3;            // 7x7 window
-const POOL = 53;             // 49 + spare
+// Chapter 3A anti-popping: the window grew one ring (7x7 -> 9x9, edge
+// ~560 m). New tiles now materialize deep inside the atmospheric haze
+// and swap in over the color-matched far backdrop — no visible popping
+// near roads. Pool is fixed at startup: zero runtime allocations.
+const RADIUS = 4;            // 9x9 window
+const POOL = 85;             // 81 + spare
 const WORLD_W = 8000, WORLD_H = 4000;
 
 export class TerrainTiles {
@@ -134,7 +138,7 @@ export class TerrainTiles {
           const v = ((J - 1) * (RES + 1) + (I - 1)) * 3;
           // Shared Phase 3 palette: grass -> basin scrub -> rock -> snow,
           // dirt roads on top (same bands as the far backdrop).
-          colorFor(info, this._rgb);
+          colorFor(info, this._rgb, wx, wz);
           col[v] = this._rgb[0]; col[v + 1] = this._rgb[1]; col[v + 2] = this._rgb[2];
         }
         grid[J * G + I] = h;
