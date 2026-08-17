@@ -63,6 +63,13 @@ export class DebugOverlay {
       (peak
         ? `PEAK ${peak.name}  [${peak.id}]\nRANGE ${peak.chain}\n`
         : `PEAK -\n`) +
-      `DRAW CALLS ${info.calls}  TRIS ${info.triangles}`;
+      `DRAW CALLS ${info.calls}  TRIS ${info.triangles}\n` +
+      // Chapter 7B.5: streaming perf instrumentation in F3.
+      (() => {
+        const s = g.world._streamStats ? g.world._streamStats() : null;
+        if (!s) return '';
+        return `STREAM ACT ${s.active}  CACHED ${s.cached}  QUEUE ${s.queue}\\n`
+             + `STREAM GEN ${s.genMs.toFixed(2)} ms / ${s.budgetMs.toFixed(2)} ms\\n`;
+      })();
   }
 }

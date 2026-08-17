@@ -237,6 +237,21 @@ export class SectorWorld {
     return this.field.landforms.nearestDestination(x, z);
   }
 
+  // Chapter 7B.5: aggregated streaming perf counters for F3.
+  _streamStats() {
+    const v = this.vegetation ? this.vegetation.streamStats() : null;
+    const p = this.props ? this.props.streamStats() : null;
+    const t = this.tiles ? this.tiles.streamStats() : null;
+    const active = v ? v.activeCells : 0;
+    const cached = v ? v.cachedCells : 0;
+    const q = v ? v.streamingQueue : 0;
+    const genMs = v ? v.lastFrameGenMs : 0;
+    const bud = v ? v.perFrameBudgetMs : 2.0;
+    return {
+      active, cached, queue: q, genMs, budgetMs: bud,
+    };
+  }
+
   // ---- Streaming ------------------------------------------------------------
 
   /** Per-frame: sector window (logical) + terrain tile window (render). */

@@ -483,7 +483,20 @@ export class Props {
       }
     }
 
-    if (this._sectorCache.size > 60) this._sectorCache.clear(); // bound memory
+    // Chapter 7B.5: sector cache is PERMANENT (no LRU clear). 9 active
+    // sectors in the +1 streaming window produce ~9 entries; cells do
+    // not get re-built when revisited (Per brief: "Cache generated
+    // sectors permanently. Reuse InstancedMesh buffers instead of
+    // recreating them. Do not regenerate sectors that were already
+    // visited.").
+    if (this._sectorCache.size > 600) {
+      // Soft cap -- only fires after >50+ window traversals.
+      let drop = 200;
+      for (const k of this._sectorCache.keys()) {
+        this._sectorCache.delete(k);
+        if (--drop <= 0) break;
+      }
+    }
     this._sectorCache.set(key, list);
     return list;
   }

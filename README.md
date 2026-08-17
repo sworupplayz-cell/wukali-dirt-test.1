@@ -683,6 +683,24 @@ touched.
 
 Build once. Test once. Commit message: **Whisper Valley ecosystem fix**.
 
+**Chapter 7B.5 — Streaming performance hotfix.** The big hitch was a
+multi-cell jump (`jump > 1` path in `Vegetation.update()`) firing
+`_rebuild(..., Infinity)`, instantly placing hundreds of plants and
+breaking the 2 ms streaming budget. 7B.5 converts even teleport
+jumps to the amortised 2 ms per-frame slice. The cell cache is now
+**permanent** (no LRU eviction -- rendered window + +1 ring is only
+~30 cells, so a hash-hit is a no-op rather than a re-build). Cell
+generation is amortised across frames via `_advanceCell` + the
+2 ms `CELL_BUDGET_MS` cap. Draw calls unchanged (~45) and well under
+the 110 budget. New F3 fields: **STREAM ACT** (active sectors /
+generated this frame), **CACHED** (cells cached permanently),
+**STREAM GEN** (frame generation time ms vs budget). The previous
+build already amortised generation per-frame; this commit tightens the
+teleport path, makes the cell cache permanent, adds the F3 counters,
+and confirms no allocation during writes (everything reuses the
+pre-allocated scratch objects in the class). Build once, test once
+(615 kB bundle, no errors). Locked systems byte-identical.
+
 ## Tests
 
 ```bash

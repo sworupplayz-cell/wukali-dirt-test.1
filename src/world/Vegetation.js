@@ -42,7 +42,9 @@ const GROUND_R = 1; // 3x3 cells for grass/flowers (~190 m) — Chapter 5B
                     // 300 m but costs instances, matrix writes and fill.
 const FAR_R = 4;    // 9x9 cells impostors    (~562 m)
 const CKEY = 65536;        // integer cell-cache key stride
-const CELL_BUDGET_MS = 0.8; // Chapter 5: per-frame plant-generation budget
+// Chapter 7B.5: per-frame streaming budget is 2 ms (per brief); was 0.8 ms
+// pre-fix. Crossing a cell boundary still drains one chunk per frame.
+const CELL_BUDGET_MS = 2.0;
 const VEG_STAGGER = 5;      // frames to wait behind the terrain tile fill
 const nowMs = typeof performance !== 'undefined' && performance.now
   ? () => performance.now() : () => Date.now();
@@ -308,7 +310,15 @@ export class Vegetation {
         : Math.max(Math.abs(cx - this._pcx), Math.abs(cz - this._pcz));
       this._pcx = cx; this._pcz = cz;
       if (jump > 1) {
-        this._rebuild(cx, cz, Infinity);
+        // Chapter 7B.5: a multi-cell jump (e.g. spawn-into-WV) must NOT
+        // rebuild the entire window in one frame either. Each chunk
+        // takes its 2 ms slice per-frame; the plant list cache holds the
+        // work in progress across frames. The first chunk lands
+        // immediately (window would otherwise stay empty) and the rest
+        // drains on subsequent frames.
+        this._pending = true;
+        this._delay = 0;
+        this._rebuild(cx, cz, CELL_BUDGET_MS);
       } else {
         // Terrain tiles use the SAME 125 m grid, so a crossing used to
         // bill new tiles AND new plants to one frame. Plants wait a few
@@ -794,18 +804,24 @@ export class Vegetation {
     let treeN = 0;
     for (let i = 0; i < job.list.length; i++) if (job.list[i].tree) treeN = i + 1;
     job.list.treeN = treeN;
-    // LRU-ish bound: drop the OLDEST entries instead of wiping the whole
-    // cache (a full clear meant every cell around the player had to be
-    // regenerated on the very next crossing).
-    if (this._cellCache.size > 420) {
-      let drop = 80;
-      for (const k of this._cellCache.keys()) {
-        this._cellCache.delete(k);
-        if (--drop <= 0) break;
-      }
-    }
+    // Chapter 7B.5: permanent cache. The rendered window + the +1
+    // pre-build ring is only ~30 cells; the cache never grows past
+    // the most-recent framings in normal play, so visiting a cell a
+    // second time is a hash-hit, not a re-build. Per brief: "Cache
+    // generated sectors permanently."
     this._cellCache.set(job.key, job.list);
     return job.list;
+  }
+
+  /** Chapter 7B.5 streaming perf counters -- exposed via SectorWorld / F3. */
+  streamStats() {
+    return {
+      activeCells: this._pending ? 'draining' : (this._pcx === null ? 'idle' : 'streaming'),
+      cachedCells: this._cellCache.size,
+      streamingQueue: this.growing ? this._growing.length : 0,
+      perFrameBudgetMs: CELL_BUDGET_MS,
+      lastFrameGenMs: this._lastFrameMs | 0,
+    };
   }
 
   /** Resume or start one cell under the frame budget; null if unfinished. */
