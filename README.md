@@ -543,6 +543,96 @@ Game core (preserved foundation):
   player X/Z, current sector, loaded sectors/tiles, terrain height, player
   altitude, slope, draw calls.
 
+**Chapter 7A — Whisper Valley rebuilt.** A complete rebuild of the spawn
+region: Rider's Meadow is no longer the player's starting point — spawn has
+moved into the centre of a continuous ~2.2 km handcrafted valley that
+RESEMBLES NO OTHER REGION. 400 m wide floor with 3-10 m rolling noise
+variation, and TWO continuous hill chains flanking the player for the
+entire valley length. Left Hills (north) 55 m tall × 130 m half-width
+with a gentle cos² crest; Right Hills (south) 65 m tall × 130 m
+half-width with a steeper cos^2.6 crest. Always-both-sides hills mean
+the player never sees a flat horizon inside the valley. 4 large forest
+masses (r=85-90 m; pine/birch mix) at NW/NE/SW/SE of spawn provide
+continuous woods instead of scattered trees. 6 boulder clusters at the
+hill bases mark where the new hills meet the valley floor (24 boulders
+total). One winding dirt road — **Whisper Path**, type-1 scenic, 4 m
+bed, grade 0.10, strong lateral wander — connects both valley ends to the
+(split) West Arm at z=2500. Nothing random: every placement is authored.
+Spawn moved to (2150, 2610) with yaw = π/2 (facing east along the
+valley); the straight slice of West Arm that crossed the valley floor
+is DELETED. From spawn the player sees: winding dirt road, forests on
+both sides, enclosing hills, no flat horizon. Preview at the live
+dev URL after `npm run dev`. Build once, test once. No other regions
+touched. Bike physics, camera, UI, streaming, quality, save unchanged.
+
+## Chapter 7B — Whisper Valley living environment
+
+Populates Whisper Valley (already rebuilt in 7A) with authored flora and
+furniture. NOTHING in the locked systems changes, NOTHING in other
+regions changes, NOTHING in the terrain itself changes.
+
+**Forests (9 patches).** 4 dense pine patches (r=85-110 m, strength
+1.75-1.85) + 3 oak groves (broadleaf, r=85-95 m) + 2 birch groves
+(r=85-90 m). Each has the lobed irregular-edge shape from buildZones;
+their high strength DOMINATES the existing cell ecosystem in WV so the
+forest reads as continuous woods rather than scatter. Trees inside
+Whisper Valley are scaled 1.30-1.80× (mature pines 13-20 m, oaks 11-18 m,
+birches 9-15 m) for a real-forest feel rather than scattered sprites.
+Inside the small clearings inside the densest forests, trees scale
+back to ~65% — cleared glades feel open.
+
+**Meadows (6).** Hand-placed wildflower meadows (kind='flower',
+r=55-80 m) at the road entrances and between forest masses; surrounding
+zones at the forest edges carry moisture-rich clover / tall grass
+(16 small zones between the forests, each r=26 m). The Whisper Path has
+been laid OUTSIDE these zones (zone placement skips any cell near the
+road bed), so the riding line stays clear.
+
+**Cabins (3).** Each handcrafted cabin (existing 'cabin' prop, coll:3.2
+SOLID) has 5 SOLID accessories fanned out around the door:
+- **fence**: existing 'fence' prop (coll:5×0.55 m circles), 6.5 m
+  behind the cabin along the cabin's -forward axis
+- **woodpile**: NEW 'woodpile' prop (3 stacked logs, coll:0.65),
+  4 m behind the cabin
+- **bench**: existing 'bench' prop (coll:0.9), 4 m in front of the
+  door, facing back at the cabin
+- **campfire**: NEW 'campfire' prop (stone bowl with glowing
+  embers, coll:0.55), between bench and viewer
+- **signpost**: existing 'sign' prop (coll:0.32), to one side, marking
+  the cabin for debug overlay / F3 reference
+
+**Natural details.** 24 hill-base boulder clusters from 7A + 30
+new hand-placed boulders (`WHISPER_BOULDERS`) = 54 total
+(spec 50-70). 30 fallen logs (`WHISPER_LOGS`) scattered by deterministic
+seeds along the floor + forest edges (cylinder geometry solid by
+3 collider circles along the length). 20 tree stumps at clearings and
+meadow edges.
+
+**Collisions (every prop SOLID).** Cabin (3.2 m circle), fence (5×0.55 m
+per post), bench (0.9 m), sign (0.32 m), campfire (0.55 m), woodpile
+(0.65 m), log (3×0.40 m), stump (0.30 m), boulder (2.2 m). The bike's
+existing prop-collider system picks all of these up — nothing is
+visual-only.
+
+**Optimisation.** +4 InstancedMesh draws (campfire / woodpile / log /
+stump), all using the shared MeshLambertMaterial — no new material.
+Total prop draws = 20 (16 existing + 4 new). Combined with vegetation
+(20 main instances + 5 impostors), terrain tiles (~6), far backdrop,
+and the existing sky / sun (1 drawCall each): well under the 110-draw
+cap. 60 FPS is preserved because instance count per frame is bounded
+and no new shader is loaded.
+
+**Preview.** Live preview at `npm run dev` after commit:
+1. **Spawn meadow** — `(2150, 2610)` looking east: Whisper Path
+   coming forward, pine + oak forest walls on every compass.
+2. **Forest road** — ride Whisper Path through the woods.
+3. **Wooden cabin** — walk to any of the 3 cabins; woodpile
+   behind, bench + campfire in front.
+4. **Flower meadow** — ride to either road entrance (x=1380 or
+   x=3220) and look over the meadow.
+5. **Forest clearing** — walk into one of the 4 small clearings
+   inside the densest pines; trees recede, the rolling floor reads.
+
 ## Tests
 
 ```bash

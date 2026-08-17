@@ -35,7 +35,12 @@ const CAP = { flags: 48, sign: 48, lookout: 24, cabin: 32, cave: 24,
   // Chapter 5: raised for the clustered ground-detail scatter — instance
   // capacity is a few hundred bytes of matrix each, and the draw-call
   // count does not move (still one InstancedMesh per model).
-  rocks: 96, boulder: 64, slab: 56, spire: 32, scree: 128 };
+  // Chapter 7B: boulders bumped to 96 to fit the WV meadow-boulder
+  // placement + ambient scatter in the rest of the world. New types
+  // (campfire, woodpile, log, stump) reuse the shared MeshLambert
+  // material -- zero extra materials, +4 draw calls total.
+  rocks: 96, boulder: 96, slab: 56, spire: 32, scree: 128,
+  campfire: 32, woodpile: 16, log: 48, stump: 48 };
 // Chapter 6B: families that take a per-instance stone tint.
 const STONE = { rocks: 1, boulder: 1, slab: 1, spire: 1, scree: 1 };
 
@@ -88,6 +93,16 @@ export class Props {
         shape: [[-2.6, 0, 0.55], [-1.3, 0, 0.55], [0, 0, 0.55],
                 [1.3, 0, 0.55], [2.6, 0, 0.55]] },           // solid 6 m run
       marker: { geo: buildMarker(), max: CAP.marker, mat, shape: [[0, 0, 0.22]] },
+      // Chapter 7B: Whisper Valley yard props. Campfire / woodpile
+      // are SOLID themselves (coll) -- brief: "Every cabin, fence,
+      // log, boulder and sign must be SOLID." Log/shape uses 3 circles
+      // along the trunk length so the bike collides with the WHOLE
+      // fallen tree, not just the centre.
+      campfire: { geo: buildCampfire(), max: CAP.campfire, mat, coll: 0.55 },
+      woodpile: { geo: buildWoodpile(), max: CAP.woodpile, mat, coll: 0.65 },
+      log: { geo: buildLog(), max: CAP.log, mat,
+        shape: [[-1.0, 0, 0.40], [0, 0, 0.40], [1.0, 0, 0.40]] },
+      stump: { geo: buildStump(), max: CAP.stump, mat, coll: 0.30 },
     };
     this.meshes = {};
     for (const [k, t] of Object.entries(this.types)) {
@@ -214,6 +229,132 @@ export class Props {
       if (p.sx < ox || p.sx >= ox + 500 || p.sz < oz || p.sz >= oz + 500) continue;
       const px = p.sx + 10, pz = p.sz + 8;
       list.push({ t: 'flags', x: px, z: pz, y: field.height(px, pz), yaw: rng() * 6.28, s: 1.15 });
+    }
+
+    // Chapter 7A: Whisper Valley rock clusters — one large primary
+    // boulder + 3 companions at six sites where the two hill chains
+    // meet the valley floor (3 left base + 3 right base). 24 boulders
+    // total, all reusing the existing 'boulder' InstancedMesh / collider
+    // (no new geometry, no new draw call, no new slot type).
+    if (lf.WHISPER_ROCKS) {
+      for (const g of lf.WHISPER_ROCKS) {
+        if (g.x < ox || g.x >= ox + 500 || g.z < oz || g.z >= oz + 500) continue;
+        // Skip if the primary sits on a road bed or inside a lake basin
+        // — every country needs the rule; we just use the existing
+        // helpers so WV doesn't grow a new codebase.
+        if (lf.roadDist(g.x, g.z) < 8) continue;
+        if (lf.inWater(g.x, g.z)) continue;
+        // Primary boulder — large.
+        list.push({
+          t: 'boulder', x: g.x, z: g.z,
+          y: field.height(g.x, g.z),
+          yaw: g.seed * 6.28, s: 1.45 + (g.seed * 0.7) % 0.35,
+        });
+        // Three smaller companions, fanned at 120° intervals.
+        for (let k = 0; k < 3; k++) {
+          const ang = g.seed * 6.28 + k * 2.094;
+          const r = 3.0 + k * 1.4;
+          const cx = g.x + Math.cos(ang) * r;
+          const cz = g.z + Math.sin(ang) * r;
+          if (lf.roadDist(cx, cz) < 7) continue;
+          if (lf.inWater(cx, cz)) continue;
+          list.push({
+            t: 'boulder', x: cx, z: cz,
+            y: field.height(cx, cz),
+            yaw: ang + 0.7, s: 0.60 + k * 0.18,
+          });
+        }
+      }
+    }
+
+    // Chapter 7B: WHISPER VALLEY living environment.
+    //   3 cabins, each with: fence + woodpile + bench + campfire +
+    //   signpost (5 SOLID accessories per cabin yard).
+    //   30 fallen LOGS scattered along the floor + meadow fringes.
+    //   30 additional BOULDERS (24 hill-base clusters from 7A are
+    //   preserved separately) -- total boulders in WV = 54 (in spec).
+    //   All props reuse the shared MeshLambert material and existing
+    //   collider type; +4 InstancedMeshes for the new prop kinds
+    //   (campfire / woodpile / log / stump).
+    if (lf.WHISPER_CABINS) {
+      for (const cabin of lf.WHISPER_CABINS) {
+        if (cabin.x < ox || cabin.x >= ox + 500 || cabin.z < oz || cabin.z >= oz + 500) continue;
+        const fwdX = Math.sin(cabin.yaw), fwdZ = Math.cos(cabin.yaw);
+        const cbX = cabin.x, cbZ = cabin.z;
+        const cbY = field.height(cbX, cbZ);
+        // 1) Cabin door faces roadYaw (road side). Forward = cabin.yaw
+        // is the path toward the yard / view side (which is the
+        // direction the door opens), so fence + woodpile go BEHIND the
+        // cabin (toward the road, away from the yard), and bench +
+        // campfire + sign go in FRONT (yard side).
+        list.push({ t: 'cabin', x: cbX, z: cbZ, y: cbY, yaw: cabin.yaw, s: 1 });
+        // Bench: 4 m in front of door (yard side), facing back at the
+        // cabin so a rider can sit and look at it.
+        list.push({ t: 'bench',
+          x: cbX + 4 * fwdX, z: cbZ + 4 * fwdZ,
+          y: field.height(cbX + 4 * fwdX, cbZ + 4 * fwdZ),
+          yaw: cabin.yaw + Math.PI, s: 1 });
+        // Campfire: between bench and viewer, slightly off-centre.
+        list.push({ t: 'campfire',
+          x: cbX + 6 * fwdX, z: cbZ + 6 * fwdZ,
+          y: field.height(cbX + 6 * fwdX, cbZ + 6 * fwdZ),
+          yaw: 0, s: 1 });
+        // Woodpile: 4 m behind cabin (toward the road).
+        list.push({ t: 'woodpile',
+          x: cbX - 4 * fwdX, z: cbZ - 4 * fwdZ,
+          y: field.height(cbX - 4 * fwdX, cbZ - 4 * fwdZ),
+          yaw: cabin.yaw, s: 1 });
+        // Fence: spans behind the cabin (toward road), facing the
+        // path of approach.
+        list.push({ t: 'fence',
+          x: cbX - 6.5 * fwdX, z: cbZ - 6.5 * fwdZ,
+          y: field.height(cbX - 6.5 * fwdX, cbZ - 6.5 * fwdZ),
+          yaw: cabin.yaw + Math.PI / 2, s: 1 });
+        // Signpost: 5 m to the side of the cabin, marking the cabin for
+        // F3 overlay and ground-truth reference.
+        list.push({ t: 'sign',
+          x: cbX + 4 * fwdX + 2 * (-fwdZ), z: cbZ + 4 * fwdZ + 2 * fwdX,
+          y: field.height(cbX + 4 * fwdX - 2 * fwdZ, cbZ + 4 * fwdZ + 2 * fwdX),
+          yaw: cabin.roadYaw ?? (cabin.yaw + Math.PI), s: 1 });
+      }
+    }
+    if (lf.WHISPER_LOGS) {
+      for (const lg of lf.WHISPER_LOGS) {
+        if (lg.x < ox || lg.x >= ox + 500 || lg.z < oz || lg.z >= oz + 500) continue;
+        // Keep the road bed clean -- fallen logs aren't placed on a
+        // road lane (rides over them but doesn't bisect the road).
+        if (lf.roadDist(lg.x, lg.z) < 5) continue;
+        if (lf.inWater(lg.x, lg.z)) continue;
+        list.push({
+          t: 'log', x: lg.x, z: lg.z,
+          y: field.height(lg.x, lg.z),
+          yaw: lg.yaw, s: lg.s,
+        });
+      }
+    }
+    if (lf.WHISPER_BOULDERS) {
+      for (const b of lf.WHISPER_BOULDERS) {
+        if (b.x < ox || b.x >= ox + 500 || b.z < oz || b.z >= oz + 500) continue;
+        if (lf.roadDist(b.x, b.z) < 6) continue;
+        if (lf.inWater(b.x, b.z)) continue;
+        list.push({
+          t: 'boulder', x: b.x, z: b.z,
+          y: field.height(b.x, b.z),
+          yaw: b.seed * 6.28, s: b.s,
+        });
+      }
+    }
+    if (lf.WHISPER_STUMPS) {
+      for (const s of lf.WHISPER_STUMPS) {
+        if (s.x < ox || s.x >= ox + 500 || s.z < oz || s.z >= oz + 500) continue;
+        if (lf.roadDist(s.x, s.z) < 4) continue;
+        if (lf.inWater(s.x, s.z)) continue;
+        list.push({
+          t: 'stump', x: s.x, z: s.z,
+          y: field.height(s.x, s.z),
+          yaw: 0, s: 1,
+        });
+      }
     }
 
     // Ambient scatter: 6 candidates, terrain-classified (~1 landmark per
@@ -640,5 +781,67 @@ function buildRest() {
     parts.push(box(0.34, 0.26, 0.3, Math.cos(a) * 0.7, 0.13, Math.sin(a) * 0.7 + 0.5,
       0.42, 0.4, 0.38, a));
   }
+  return mergeGeometries(parts);
+}
+
+// ---- Chapter 7B: Whisper Valley yard props (campfire / woodpile / log / stump)
+
+/** Campfire: bowl of stones + glowing embers, placed in front of the cabin door. */
+function buildCampfire() {
+  const parts = [];
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    const g = new THREE.IcosahedronGeometry(0.20, 0);
+    g.translate(Math.cos(a) * 0.32, 0.10, Math.sin(a) * 0.32);
+    parts.push(colored(g, 0.42, 0.34, 0.28));
+  }
+  const e = new THREE.CircleGeometry(0.22, 8);
+  e.rotateX(-Math.PI / 2);
+  e.translate(0, 0.20, 0);
+  parts.push(colored(e, 0.95, 0.50, 0.18));
+  return mergeGeometries(parts);
+}
+
+/** Woodpile: 3 stacked, offset horizontal logs. */
+function buildWoodpile() {
+  const parts = [];
+  const spec = [
+    [0.65, 0.18, 0,    0,    0.40],
+    [0.60, 0.16, 0.06, 0.06, 0.20],
+    [0.50, 0.14, 0.12, 0.12, 0    ],
+  ];
+  for (const [w, h, dx, dz, yc] of spec) {
+    const g = new THREE.CylinderGeometry(w * 0.5, w * 0.5, h, 6);
+    g.rotateZ(Math.PI / 2);
+    g.translate(dx, yc, dz);
+    parts.push(colored(g, 0.40, 0.28, 0.18));
+  }
+  return mergeGeometries(parts);
+}
+
+/** Fallen log: horizontal cylinder on the ground with a sawn end. */
+function buildLog() {
+  const parts = [];
+  const g = new THREE.CylinderGeometry(0.22, 0.28, 2.0, 6);
+  g.rotateZ(Math.PI / 2);
+  g.translate(0, 0.22, 0);
+  parts.push(colored(g, 0.42, 0.30, 0.20));
+  const end = new THREE.CircleGeometry(0.22, 6);
+  end.rotateY(-Math.PI / 2);
+  end.translate(1.0, 0.22, 0);
+  parts.push(colored(end, 0.72, 0.58, 0.40));
+  return mergeGeometries(parts);
+}
+
+/** Tree stump: flat-topped cylinder, sawn top. */
+function buildStump() {
+  const parts = [];
+  const g = new THREE.CylinderGeometry(0.30, 0.36, 0.45, 6);
+  g.translate(0, 0.22, 0);
+  parts.push(colored(g, 0.38, 0.27, 0.18));
+  const top = new THREE.CircleGeometry(0.30, 6);
+  top.rotateX(-Math.PI / 2);
+  top.translate(0, 0.46, 0);
+  parts.push(colored(top, 0.72, 0.58, 0.40));
   return mergeGeometries(parts);
 }

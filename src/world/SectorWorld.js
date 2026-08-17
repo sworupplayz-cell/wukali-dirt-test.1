@@ -62,17 +62,16 @@ export class SectorWorld {
     // for future gameplay streaming.
     this._grid = new ChunkGrid(SECTOR_SIZE, STREAM_RADIUS);
 
-    // Rider's Meadow spawn. HOTFIX 5B.3: the spawn used to sit ON the
-    // 4-way junction, so the first thing the player saw was a wide dirt
-    // road filling the bottom of the frame. It now stands in the meadow
-    // grass 44 m off the junction — the South Arm is 26 m to the west
-    // (a dirt road in view, not underfoot), the abandoned cabin and the
-    // lake lie ahead to the south-west, and the meadow's forest patches
-    // ring the horizon in every direction. Still inside Rider's Meadow,
-    // still flat (0.3 deg), still the world centre for every system that
-    // asks for it.
-    const sx = 4026, sz = 2464;
-    this._spawn = { x: sx, y: this.field.height(sx, sz), z: sz, yaw: -1.57 }; // facing the dirt road 26 m west (slightly downhill, cabin beyond)
+    // Chapter 7A: SPAWN MOVED INTO WHISPER VALLEY. The player now starts
+    // in the centre of the valley floor with both hill chains flanking
+    // them, all four forest masses visible at the edges of the view, and
+    // the winding Whisper Path coming up the foreground. yaw = π/2 puts
+    // the rider facing EAST along the road; looking west they see the
+    // other half of the path bend back. The valley never reveals a flat
+    // horizon in any direction — the L+ R hills stretch its full 2.2
+    // km length and close every line of sight.
+    const sx = 2150, sz = 2610;
+    this._spawn = { x: sx, y: this.field.height(sx, sz), z: sz, yaw: Math.PI / 2 }; // facing east along the valley
 
     // Lakes: one static water disc each (1 draw call apiece).
     // Chapter 4R render fix: transparent water must not write depth —

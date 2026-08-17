@@ -194,6 +194,19 @@ export class TerrainField {
     // a landmark under the waterline once the lake carve came off.
     h -= Math.max(lf.basinDepth(x, z, corr), lf.valleyDepth(x, z, corr)) * (1 - mm);
 
+    // ---- Chapter 7A: Whisper Valley terrain composition ---------------
+    // The floor carves a rolling groove ON TOP of the basin/valley
+    // excavation (Sundown Basin already took most of the depth out of
+    // Whisper Valley's footprint) and adds gentle ±5 m noise variation
+    // that gives the floor its 3-10 m riding relief. The two hill
+    // chains rise above everything except mountains: hills add, never
+    // subtract, so they can't form walls or drop the player into holes.
+    // All three are tight-bounded (zero outside WV bbox), so the rest
+    // of the world stays bit-identical with every other region.
+    h -= lf.whisperValleyFloor(x, z);
+    h += lf.whisperValleyHills(x, z, 'l')
+        + lf.whisperValleyHills(x, z, 'r');
+
     // ---- 6. Roads follow valleys --------------------------------------
     // Every main corridor carries a shallow vale of its own, so a road
     // laid down the corridor is a road running along a valley floor.

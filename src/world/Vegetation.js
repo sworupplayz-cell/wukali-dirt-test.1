@@ -32,7 +32,10 @@ const CELL = 125;
 const NEAR_R = 2;   // 5x5 cells full detail  (~312 m)
 // The spawn point (see SectorWorld). Nothing with a trunk is planted in
 // its immediate bubble, so the player never starts inside a tree.
-const SPAWN_X = 4026, SPAWN_Z = 2464;
+// Chapter 7A: moved into Whisper Valley centre so the spawn view
+// frames both hill chains, all four forest masses, and the winding
+// Whisper Path on either side.
+const SPAWN_X = 2150, SPAWN_Z = 2610;
 const SPAWN_CLEAR = 13;
 const GROUND_R = 1; // 3x3 cells for grass/flowers (~190 m) — Chapter 5B
                     // distance culling: sward is invisible clutter at
@@ -398,7 +401,13 @@ export class Vegetation {
     }
     // ...and OUTSIDE the zones the plains still get a floor of scattered
     // trees and brush, so no stretch of rideable ground is bare.
-    if (nTrees < 2 && hCell >= 50 && hCell < 900) nTrees = 2;
+    // Chapter 7A: inside Whisper Valley the 4 WV forest zones drive
+    // tree placement; the rest of the valley floor is open space and
+    // doesn't get the outside-world "two trees per cell" scatter — that
+    // scatter is what made WV forests (in old versions) read as decoration
+    // rather than woods.
+    if (nTrees < 2 && hCell >= 50 && hCell < 900
+        && !lf.inWhisperValley(ox + CELL * 0.5, oz + CELL * 0.5)) nTrees = 2;
     // THE SPAWN VALLEY (hotfix 5B.1). The first thing the player sees can
     // never be an empty field: the meadow bowl gets a guaranteed budget of
     // groves and ground detail, thinning back to the normal world by
@@ -534,6 +543,7 @@ export class Vegetation {
             }
             // A forest patch stamps its own character on its stands.
             if (zoneKind === 'pine' && !spawnValley) t = r < 0.62 ? 'pine' : r < 0.9 ? 'fir' : 'dead';
+            else if (zoneKind === 'oak') t = r < 0.62 ? 'oak' : r < 0.92 ? 'birch' : 'bush';
             else if (zoneKind === 'birch') t = r < 0.66 ? 'birch' : r < 0.88 ? 'oak' : 'bush';
             else if (zoneKind === 'thicket') t = r < 0.42 ? 'bush' : r < 0.68 ? 'shrub' : r < 0.9 ? 'oak' : 'dryBush';
             if (info.moist < 0.25 && rr < 0.3 && !spawnValley) t = 'dead';
@@ -592,7 +602,20 @@ export class Vegetation {
             // ecosystem branch above happened to set, so every path that
             // can produce a tree — mountain belt, spawn valley, rolling
             // hills, lakeshore birch, patch character — gets a mature one.
-            if (TREE_H[t]) s = treeHeight(t, rng());
+            if (TREE_H[t]) {
+              s = treeHeight(t, rng());
+              // Chapter 7B: trees in Whisper Valley are 1.30-1.80x
+              // larger than the rest of the world so the dense forest
+              // reads as mature woods, not scattered sprite-trees.
+              if (lf.inWhisperValley(x, z)) s *= 1.30 + rng() * 0.50;
+              // Trees inside small clearings stay short so cleared
+              // glades feel open, not enclosed by a canopy.
+              if (lf.WHISPER_CLEARINGS) {
+                for (const cl of lf.WHISPER_CLEARINGS) {
+                  if (Math.hypot(x - cl.x, z - cl.z) < cl.r) { s *= 0.65; break; }
+                }
+              }
+            }
             const big = TRUNKED[t] === true;
             const rF = big ? 0.9 : 0.5;
             const y = (big
@@ -1436,6 +1459,40 @@ function buildZones(field) {
       if (r < off + 25) continue;
       if (push(rx[i] - tz * side * off, rz[i] + tx * side * off, r, 0, 300)) placed++;
     }
+  }
+
+  // ---- Chapter 7A: Whisper Valley forest masses -----------------------
+  // Four large woods (NW / NE / SW / SE around the spawn) replace the
+  // valley's scattered trees with continuous forest. 120-220 m wide
+  // (radius 85-90 m); positions chosen so the rider sees woods on both
+  // sides and along the road in every direction from spawn.
+  if (lf.WHISPER_FORESTS && lf.WHISPER_BBOX) {
+    const pushWV = (x, z, r, kind) => {
+      const h = field.height(x, z);
+      if (h < 52 || h > 620) return false;
+      if (lf.inWater(x, z)) return false;
+      // No minMeadow gate — Whisper Valley is the spawn region now,
+      // Rider's Meadow is far away.
+      const e = 9;
+      const sl = Math.hypot(field.height(x + e, z) - field.height(x - e, z),
+        field.height(x, z + e) - field.height(x, z - e)) / (2 * e);
+      if (sl > 0.5) return false;
+      zones.push({
+        x, z, r, kind,
+        // Higher strength than push() (mean ~1.55 vs push() mean ~1.18)
+        // so these zones DOMINATE any overlapping grid/river/road
+        // zones. The player sees continuous forest, not a histogram.
+        strength: 1.50 + hash01(x | 0, z | 0, 0x7e1) * 0.20,
+        a1: hash01(x | 0, z | 0, 0x31) * 6.283,
+        k1: 0.16 + hash01(x | 0, z | 0, 0x32) * 0.16,
+        a2: hash01(x | 0, z | 0, 0x33) * 6.283,
+        k2: 0.08 + hash01(x | 0, z | 0, 0x34) * 0.12,
+        a3: hash01(x | 0, z | 0, 0x35) * 6.283,
+        clear: 0,                              // dense, no interior clearing
+      });
+      return true;
+    };
+    for (const fb of lf.WHISPER_FORESTS) pushWV(fb.x, fb.z, fb.r, fb.kind);
   }
   return zones;
 }

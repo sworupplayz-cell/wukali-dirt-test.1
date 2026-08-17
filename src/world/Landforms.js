@@ -161,6 +161,212 @@ const MAJOR_VIEWPOINTS = [
   { id: 'MV6', name: 'Mirror Lake Overlook', x: 2352, z: 2565 },
 ];
 
+// ---- Chapter 7A — Whisper Valley (REBUILD, not addition) -------------
+// A continuous 2.2 km scenic valley that REPLACES the straight road
+// slice of West Arm and BECOMES the spawn region. Handcrafted: two
+// hill chains flanking a rolling floor, four forest masses around the
+// spawn, one winding dirt road that the player can ride. NOTHING in
+// the world is random — every placement is authored here.
+export const WHISPER_VALLEY = {
+  // Floor centerline (~2.2 km, gently curving). Spawn sits near the
+  // middle at roughly (2150, 2610) so the rider sees the whole valley
+  // when they look either direction along the road.
+  spine: [
+    [1300, 2540], [1520, 2570], [1800, 2600], [2150, 2610],
+    [2450, 2630], [2750, 2610], [3030, 2570], [3300, 2530],
+  ],
+  // Floor dimensions: 200 m half-width = 400 m wide valley. Both
+  // hill chains flank the floor without overlapping it enough to
+  // create a wall — the player can ride the rim, not bounce off it.
+  floorHalfWidth: 200,
+  // Base trench depth — kept small (~2 m) because the BASIN under
+  // Whisper Valley (Sundown Basin, centered at 2350, 2690 r=640)
+  // already carved the wider floor to ~26 m below natural terrain.
+  // We gently deepen its groove, then add rolling undulation on top.
+  floorDepth: 2,
+  // LEFT hills (north side of the valley). Cos² crest: gentle silhouette.
+  leftHills: {
+    spine: [
+      [1280, 2360], [1500, 2400], [1800, 2450], [2150, 2500],
+      [2450, 2540], [2750, 2530], [3030, 2470], [3300, 2420],
+    ],
+    height: 55,        // 45-70 m spec, mid-range
+    halfWidth: 130,
+    steepness: 1.0,    // cos² (gentle)
+  },
+  // RIGHT hills (south side). Cos^2.6 crest: slightly steeper flank,
+  // peak narrower at the top — matches the spec's "slightly steeper
+  // than left". Both hills span the full valley length without a gap.
+  rightHills: {
+    spine: [
+      [1290, 2760], [1510, 2800], [1800, 2840], [2150, 2880],
+      [2450, 2910], [2750, 2890], [3030, 2840], [3300, 2790],
+    ],
+    height: 65,        // 45-80 m spec, slightly higher than the left
+    halfWidth: 130,
+    steepness: 1.6,    // cos^2.6 → flank drops faster
+  },
+};
+
+// Spawn axis-aligned bbox (rough). Used by Vegetation / Props to gate
+// "inside Whisper Valley" checks. Loose bounds so the hills and road
+// are inside, the foreground forest edges are inside, and the surrounding
+// lowland is outside.
+export const WHISPER_BBOX = { x0: 1100, x1: 3400, z0: 2280, z1: 2960 };
+
+// ---- Chapter 7B: Whisper Valley living environment ----------------
+// FORESTS. 9 masses total = 4 dense pines + 3 oak groves + 2 birch
+// groves, scattered across the valley so the rider is always surrounded
+// by woods. Each forest is r=80-110 m (160-220 m diameter -- within
+// spec). Strength > 1.65 so these zones DOMINATE the cell ecosystem.
+export const WHISPER_FORESTS = [
+  // 4 dense pine patches spanning the W half of the valley.
+  { x: 1500, z: 2470, r: 100, kind: 'pine', strength: 1.80 },
+  { x: 1850, z: 2530, r: 110, kind: 'pine', strength: 1.85 },
+  { x: 2150, z: 2500, r: 85,  kind: 'pine', strength: 1.75 },  // pine 3 near spawn
+  { x: 2150, z: 2720, r: 85,  kind: 'pine', strength: 1.75 },  // pine 4 near spawn
+  // 3 oak groves (broadleaf) anchoring the centre and east edge.
+  { x: 2480, z: 2470, r: 95,  kind: 'oak',   strength: 1.85 },
+  { x: 2480, z: 2610, r: 85,  kind: 'oak',   strength: 1.80 },
+  { x: 2820, z: 2720, r: 100, kind: 'oak',   strength: 1.85 },
+  // 2 birch groves as light accents between the denser forests.
+  { x: 2820, z: 2470, r: 85,  kind: 'birch', strength: 1.65 },
+  { x: 3170, z: 2520, r: 90,  kind: 'birch', strength: 1.65 },
+];
+
+// 6 OPEN WILDFLOWER MEADOWS, one between each adjacent forest mass + at
+// the road entrances. 'flower' kind drives dense wildflower drift;
+// surrounding moisture-rich zones at the edges attract clover + grass.
+export const WHISPER_MEADOWS = [
+  { x: 1380, z: 2530, r: 75 },  // W road entrance meadow
+  { x: 1670, z: 2320, r: 55 },  // W left-hill meadow
+  { x: 1700, z: 2610, r: 60 },  // SW meadow between forests 1, 2
+  { x: 2000, z: 2780, r: 70 },  // S meadow between forests 2, 4
+  { x: 2650, z: 2800, r: 60 },  // S meadow between forests 6, 7
+  { x: 3220, z: 2490, r: 75 },  // E road entrance meadow
+];
+
+// Small forest CLEARINGS -- interior open spots inside the densest pine
+// forests (every third zone gets a 18-30 m clearing so the woods read as
+// travelled rather than uniform). Cleared areas pick low-density sward.
+export const WHISPER_CLEARINGS = (() => {
+  const a = [];
+  for (let i = 0; i < WHISPER_FORESTS.length; i++) {
+    if (i % 3 !== 0) continue;
+    const f = WHISPER_FORESTS[i];
+    a.push({
+      x: f.x + (((i * 41) % 60) - 30),
+      z: f.z + (((i * 67) % 60) - 30),
+      r: 18 + ((i * 13) % 12),
+    });
+  }
+  return a;
+})();
+
+// Tall-grass RINGS around each forest mass -- small zones that override
+// the meadow-cell ecosystem to clover / grassTall instead of bare floor.
+export const WHISPER_FOREST_EDGE_GRASS = (() => {
+  const a = [];
+  for (let i = 0; i < WHISPER_FORESTS.length; i++) {
+    const f = WHISPER_FORESTS[i];
+    for (let k = 0; k < 4; k++) {
+      const ang = (k * 1.57) + 0.4;
+      a.push({
+        x: f.x + Math.cos(ang) * (f.r + 22),
+        z: f.z + Math.sin(ang) * (f.r + 22),
+        r: 26,
+      });
+    }
+  }
+  return a;
+})();
+
+// 3 handcrafted CABINS, each beside Whisper Path. Yaw is the cabin's
+// facing direction (door side, away from the road). Props.js fans each
+// one out into a fence + woodpile + bench + campfire + small signpost.
+export const WHISPER_CABINS = [
+  { x: 1880, yaw:  0.6, roadYaw: -2.6 },  // W cabin (facing SE toward road)
+  { x: 2395, yaw: -0.5, roadYaw:  2.2 },  // C cabin (facing SE)
+  { x: 2900, yaw: -1.6, roadYaw:  2.6 },  // E cabin (facing S toward road)
+];
+
+// 30 BOULDERS -- additional hand-placed rocks on the valley floor
+// (the original 24 WHISPER_ROCKS at the hill bases are preserved).
+// Total boulders in WV = 24 + 30 = 54 (spec: 50-70). Each uses the
+// existing 'boulder' prop / coll:2.2 / collider.
+export const WHISPER_BOULDERS = (() => {
+  const a = [];
+  for (let i = 0; i < 30; i++) {
+    const q = i % 4;
+    const x0 = [1400, 2900, 1900, 2700][q];
+    const z0 = [2450, 2470, 2800, 2780][q];
+    const ang = (i * 0.71) * 6.28 + q * 1.57;
+    const r  = 30 + ((i * 13) % 130);
+    a.push({
+      x: x0 + Math.cos(ang) * r,
+      z: z0 + Math.sin(ang) * r * 0.7,
+      seed: ((i + 1) * 0.61803) % 1,
+      s: 0.55 + ((i * 7) % 100) / 240,
+    });
+  }
+  return a;
+})();
+
+// 30 fallen LOGS — flesh out forest edges and the meadow fringes.
+// Hand-placed (deterministic) — not random; that's the brief.
+export const WHISPER_LOGS = (() => {
+  const pts = [
+    [1410, 2530], [1610, 2495], [1770, 2510], [1890, 2660], [2060, 2560],
+    [2210, 2500], [2310, 2720], [2450, 2540], [2600, 2670], [2740, 2530],
+    [2910, 2580], [3050, 2680], [3190, 2520], [3230, 2570], [3300, 2510],
+    [1860, 2400], [2180, 2400], [2480, 2400], [1810, 2770], [2210, 2790],
+    [2520, 2790], [2850, 2390], [1500, 2600], [1930, 2770], [3170, 2790],
+    [2100, 2780], [2660, 2390], [2540, 2770], [1700, 2470], [3100, 2400],
+  ];
+  const a = [];
+  for (let i = 0; i < pts.length; i++) {
+    a.push({
+      x: pts[i][0] + ((i * 17) % 11) - 5,
+      z: pts[i][1] + ((i * 23) % 13) - 6,
+      yaw: (i * 0.91) * 6.28,
+      s: 0.85 + ((i * 11) % 30) / 70,
+    });
+  }
+  return a;
+})();
+
+// 20 TREE STUMPS — small sawn woody discs scattered through clearings
+// and at the entrance to each forest mass (30 are 50-70 spec apex,
+// these are additional hand-placed props).
+export const WHISPER_STUMPS = (() => {
+  const a = [];
+  const pts = [
+    [1620, 2470], [1670, 2700], [1810, 2620], [1960, 2570], [2130, 2640],
+    [2270, 2470], [2440, 2700], [2580, 2530], [2730, 2630], [2870, 2560],
+    [1970, 2400], [2230, 2790], [2540, 2400], [2900, 2700], [3100, 2520],
+    [1880, 2680], [2380, 2680], [2620, 2460], [2800, 2400], [3200, 2600],
+  ];
+  for (let i = 0; i < pts.length; i++) {
+    a.push({
+      x: pts[i][0] + ((i * 19) % 7) - 3,
+      z: pts[i][1] + ((i * 23) % 7) - 3,
+    });
+  }
+  return a;
+})();
+
+// Six boulder CLUSTERS where the two hill chains meet the valley
+// floor. One primary boulder + 3 companions each = 24 boulders total,
+// reusing the existing 'boulder' InstancedMesh / material / collider.
+export const WHISPER_ROCKS = [
+  { x: 1700, z: 2400, seed: 0.21 },  // left (north) base, west
+  { x: 2150, z: 2480, seed: 0.55 },  // left base, centre
+  { x: 2600, z: 2410, seed: 0.82 },  // left base, east (NE corner)
+  { x: 1700, z: 2780, seed: 0.33 },  // right (south) base, west
+  { x: 2150, z: 2780, seed: 0.66 },  // right base, centre
+  { x: 2600, z: 2780, seed: 0.91 },  // right base, east (SE corner)
+];
+
 // ---- 4. Mountain ranges (scenery): spine nodes [x, z, H, W, name] ----------
 // Phase 3.1 redistribution — the spawn bowl is gone:
 //   N  : Northwall (major range, pushed to the top edge)
@@ -241,7 +447,15 @@ const MAIN_ROUTES = [
     [1000, 3300], [850, 2500], [1000, 1700]] },
   { name: 'North Arm', calm: true, pts: [[4000, 1480], [4000, 2000], [4000, 2500]] },
   { name: 'South Arm', calm: true, pts: [[4000, 2500], [4000, 3000], [4000, 3520]] },
-  { name: 'West Arm', calm: true, pts: [[850, 2500], [2400, 2500], [4000, 2500]] },
+  // Chapter 7A: West Arm is SPLIT around Whisper Valley. The straight
+  // slice that used to cross the WV floor (x=1100 to 3300 at z=2500)
+  // is replaced by the winding Whisper Path (see NAMED_TRAILS). West
+  // Arm still connects Rider's Meadow at (4000, 2500) westward to the
+  // western world (850, 2500); it just stops at each WV entrance and
+  // picks up at the WV exit. No dead end: Whisper Path inherits both
+  // endpoints from West Arm at z=2500.
+  { name: 'West Arm', calm: true, pts: [[850, 2500], [1100, 2500]] },
+  { name: 'West Arm', calm: true, pts: [[3300, 2500], [4000, 2500]] },
   { name: 'East Arm', calm: true, pts: [[4000, 2500], [5600, 2500], [7150, 2500]] },
   { name: 'Meadow Loop', calm: true, pts: [
     [4000, 1680], [4410, 1790], [4710, 2090], [4820, 2500], [4710, 2910],
@@ -305,6 +519,17 @@ const NAMED_TRAILS = [
     [700, 2830], [720, 2500], [700, 2230]] },
   { name: 'Coast Caves Trail', w: 1.25, grade: 0.16, type: 4, wander: 0.4, pts: [
     [5700, 4310], [5920, 4400], [5980, 4520], [6180, 4620]] },
+  // Chapter 7A: WHISPER PATH — the winding dirt road through valley
+  // floor. Both endpoints meet the (split) West Arm at z=2500, so no
+  // dead end. Strong lateral wander (0.7) lets the road follow the
+  // rolling contours rather than cutting across them. Passes very
+  // close to spawn (2150, 2610) so the road is visible from there.
+  // Type 1 (small main) so it draws as packed dirt, grade 0.10 keeps
+  // it under the rideable ceiling even across the basin floor.
+  { name: 'Whisper Path', w: 2.0, grade: 0.10, type: 1, wander: 0.7, pts: [
+    [1300, 2500], [1500, 2560], [1700, 2600], [1900, 2630],
+    [2100, 2620], [2300, 2630], [2500, 2620], [2700, 2590],
+    [2900, 2550], [3100, 2520], [3300, 2500]] },
 ];
 
 // ---- 5. Pass roads: [rangeIdx, gapIdx] saddles carrying switchbacks --------
@@ -699,6 +924,77 @@ export class Landforms {
       if (v > add) add = v;
     }
     return add * (1 - 0.6 * corr);
+  }
+
+  // ---- Chapter 7A: WHISPER VALLEY floor + hill methods -----------------
+  // Floor returns the DEPTH in metres to CARVE OUT. Terrain subtracts it;
+  // outside the floor half-width it returns 0. Hills return the height in
+  // metres to ADD; outside their respective half-widths they return 0.
+  // Both rebuild the world only inside WHISPER_VALLEY — a tight bbox
+  // around the new spine — so every other region stays bit-identical.
+
+  /** Floor profile (Chapter 7A). Subtract this from natural terrain. */
+  whisperValleyFloor(x, z) {
+    const spine = WHISPER_VALLEY.spine;
+    let d2 = Infinity;
+    for (let i = 0; i < spine.length - 1; i++) {
+      segNearest(x, z, spine[i][0], spine[i][1], spine[i + 1][0], spine[i + 1][1]);
+      if (_SN.d2 < d2) d2 = _SN.d2;
+    }
+    const d = Math.sqrt(d2);
+    if (d >= WHISPER_VALLEY.floorHalfWidth) return 0;
+    const u = d / WHISPER_VALLEY.floorHalfWidth;
+    // Base trench: smooth (1 - u^2) fade from 0 at the rim to floorDepth
+    // at the centre. Kept small (~2 m) because Sundown Basin (centered
+    // at 2350, 2690, r=640, depth=26 m) already carved the wider floor
+    // to ~26 m below natural. We just gently deepen the groove.
+    const trenchDepth = WHISPER_VALLEY.floorDepth * (1 - u * u);
+    // GENTLE ROLLING UNDULATION. Two layers of noise sampled at large
+    // wavelengths (~150 m and ~80 m) so the variation lands in the
+    // 3-10 m spec band, with no sharp bumps. Edge-fade so noise dies
+    // before the floor rim so WV terrain joins the surrounding lowland
+    // smoothly (no cliff where the trench meets the open country).
+    const lon = vnoise(x * 0.0042 - 7.3, z * 0.0034 + 11.5, 8.13);
+    const lat = vnoise(x * 0.0078 + 3.1, z * 0.0061 - 4.3, 16.39);
+    const rolling = (lon - 0.5) * 7 + (lat - 0.5) * 3;     // ±5 m peak-to-peak
+    const edge = 1 - u * u;
+    return trenchDepth + rolling * edge;
+  }
+
+  /**
+   * Enclosing hills on one side of the valley.
+   *   side === 'l'  →  left hills (north side, gentler flank)
+   *   side === 'r'  →  right hills (south side, slightly steeper flank)
+   *
+   * Profile: cos^p(u * π/2) where p = 1 + steepness.
+   *   left hills:  steepness 1.0 → cos²    (45-70 m spec, gentle)
+   *   right hills: steepness 1.6 → cos^2.6  (45-80 m spec, steeper)
+   * Domain-warped so each hill's silhouette is irregular, not perfectly
+   * repeated along the spine. Returns 0 outside the configured half-width
+   * so the contribution dies smoothly at the flank.
+   */
+  whisperValleyHills(x, z, side) {
+    const cfg = side === 'l' ? WHISPER_VALLEY.leftHills : WHISPER_VALLEY.rightHills;
+    let d2 = Infinity;
+    for (let i = 0; i < cfg.spine.length - 1; i++) {
+      segNearest(x, z, cfg.spine[i][0], cfg.spine[i][1],
+        cfg.spine[i + 1][0], cfg.spine[i + 1][1]);
+      if (_SN.d2 < d2) d2 = _SN.d2;
+    }
+    const d = Math.sqrt(d2);
+    if (d >= cfg.halfWidth) return 0;
+    const u = d / cfg.halfWidth;
+    const exp = 1 + (cfg.steepness || 1.0);                 // left: 2, right: 2.6
+    const crest = cfg.height * Math.cos(u * Math.PI * 0.5) ** exp;
+    // Mild domain warp so the ridge silhouette isn't a perfect prism.
+    const wob = 1 + 0.18 * (vnoise(x * 0.0035 + 11.3, z * 0.0035 - 4.4, S + 81) - 0.5);
+    return crest * wob;
+  }
+
+  /** Loose-axis bbox test for the new valley (used by Vegetation / Props). */
+  inWhisperValley(x, z) {
+    return x >= WHISPER_BBOX.x0 && x <= WHISPER_BBOX.x1
+        && z >= WHISPER_BBOX.z0 && z <= WHISPER_BBOX.z1;
   }
 
 
