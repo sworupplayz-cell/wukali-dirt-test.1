@@ -219,31 +219,47 @@ export const WHISPER_BBOX = { x0: 1100, x1: 3400, z0: 2280, z1: 2960 };
 // groves, scattered across the valley so the rider is always surrounded
 // by woods. Each forest is r=80-110 m (160-220 m diameter -- within
 // spec). Strength > 1.65 so these zones DOMINATE the cell ecosystem.
+// ---- Chapter 7C: Whisper Valley ecosystem fix --------------------
+// FORESTS. EXACTLY 8 patches distributed evenly across the 2.2 km
+// valley so the rider sees wood in every compass bearing. Strength
+// 1.70-1.95 so they DOMINATE the cell ecosystem in WV. Sizes
+// r=70-90 m (140-180 m diameter) match the 80-180 m spec. Kinds alternate
+// pine / oak / birch along the valley.
+//
+// Valley spans x = 1300..3300 (2000 m). 8 patches -> ~250 m spacing.
+// z alternates N (smaller z) and S (larger z) of the road so a given
+// compass always sees wood on at least one side.
 export const WHISPER_FORESTS = [
-  // 4 dense pine patches spanning the W half of the valley.
-  { x: 1500, z: 2470, r: 100, kind: 'pine', strength: 1.80 },
-  { x: 1850, z: 2530, r: 110, kind: 'pine', strength: 1.85 },
-  { x: 2150, z: 2500, r: 85,  kind: 'pine', strength: 1.75 },  // pine 3 near spawn
-  { x: 2150, z: 2720, r: 85,  kind: 'pine', strength: 1.75 },  // pine 4 near spawn
-  // 3 oak groves (broadleaf) anchoring the centre and east edge.
-  { x: 2480, z: 2470, r: 95,  kind: 'oak',   strength: 1.85 },
-  { x: 2480, z: 2610, r: 85,  kind: 'oak',   strength: 1.80 },
-  { x: 2820, z: 2720, r: 100, kind: 'oak',   strength: 1.85 },
-  // 2 birch groves as light accents between the denser forests.
-  { x: 2820, z: 2470, r: 85,  kind: 'birch', strength: 1.65 },
-  { x: 3170, z: 2520, r: 90,  kind: 'birch', strength: 1.65 },
+  // W - W entrance woodland (mostly pine, dense centre).
+  { x: 1430, z: 2470, r: 80, kind: 'pine',  strength: 1.85 },
+  { x: 1680, z: 2710, r: 75, kind: 'birch', strength: 1.75 },
+  // W-mid
+  { x: 1930, z: 2470, r: 80, kind: 'pine',  strength: 1.85 },
+  { x: 2180, z: 2710, r: 85, kind: 'oak',   strength: 1.90 },  // central oak
+  // E-mid
+  { x: 2430, z: 2470, r: 80, kind: 'pine',  strength: 1.80 },
+  { x: 2680, z: 2710, r: 75, kind: 'oak',   strength: 1.85 },
+  // E - E entrance woodland
+  { x: 2930, z: 2470, r: 70, kind: 'birch', strength: 1.70 },
+  { x: 3180, z: 2710, r: 80, kind: 'pine',  strength: 1.85 },
 ];
 
-// 6 OPEN WILDFLOWER MEADOWS, one between each adjacent forest mass + at
-// the road entrances. 'flower' kind drives dense wildflower drift;
-// surrounding moisture-rich zones at the edges attract clover + grass.
+// 8 VISIBLE WILDFLOWER MEADOWS alternating N and S of the road so the
+// rider sees them in every quarter of the valley. Each is 60-80 m wide
+// and 8-12 m off the road bed (Props.sectorProps() filters anything too
+// close to the road so the riding path stays clear). 'flower' kind
+// drives dense wildflower drift; per-instance yellow/white/purple
+// tints in Vegetation._write() give each meadow the visible colour
+// mix the brief asks for.
 export const WHISPER_MEADOWS = [
-  { x: 1380, z: 2530, r: 75 },  // W road entrance meadow
-  { x: 1670, z: 2320, r: 55 },  // W left-hill meadow
-  { x: 1700, z: 2610, r: 60 },  // SW meadow between forests 1, 2
-  { x: 2000, z: 2780, r: 70 },  // S meadow between forests 2, 4
-  { x: 2650, z: 2800, r: 60 },  // S meadow between forests 6, 7
-  { x: 3220, z: 2490, r: 75 },  // E road entrance meadow
+  { x: 1555, z: 2490, r: 70 },  // W entry - N side
+  { x: 1700, z: 2725, r: 65 },  // W - S side
+  { x: 1950, z: 2490, r: 75 },  // W-mid - N (within 300 m of spawn)
+  { x: 2090, z: 2735, r: 65 },  // W-mid - S
+  { x: 2450, z: 2730, r: 65 },  // E-mid - S
+  { x: 2700, z: 2490, r: 70 },  // E-mid - N
+  { x: 2950, z: 2720, r: 65 },  // E - S
+  { x: 3220, z: 2480, r: 75 },  // E entry - N side
 ];
 
 // Small forest CLEARINGS -- interior open spots inside the densest pine
@@ -281,55 +297,73 @@ export const WHISPER_FOREST_EDGE_GRASS = (() => {
   return a;
 })();
 
-// 3 handcrafted CABINS, each beside Whisper Path. Yaw is the cabin's
-// facing direction (door side, away from the road). Props.js fans each
-// one out into a fence + woodpile + bench + campfire + small signpost.
+// 3 handcrafted CABINS, each beside Whisper Path and within 15 m of the
+// road bed so riders see + discover them on the first pass. cabin.yaw is
+// the door / yard direction (facing TOWARD the road, so the rider sees
+// the door + campfire + bench when they pass). roadYaw is the direction
+// from cabin to road (used by Props to place the signpost on the road
+// approach). Props.fence+woodpile go BEHIND the cabin (away from the
+// road), so the yard opens toward the player.
 export const WHISPER_CABINS = [
-  { x: 1880, yaw:  0.6, roadYaw: -2.6 },  // W cabin (facing SE toward road)
-  { x: 2395, yaw: -0.5, roadYaw:  2.2 },  // C cabin (facing SE)
-  { x: 2900, yaw: -1.6, roadYaw:  2.6 },  // E cabin (facing S toward road)
+  // Cabin 1 (W entry) - road at ~z 2630 here, cabin 15 m S at 2645.
+  { x: 1900, yaw: Math.PI, roadYaw: Math.PI },
+  // Cabin 2 (centre) - one of the spawn-discovery candidates.
+  { x: 2400, yaw: Math.PI, roadYaw: Math.PI },
+  // Cabin 3 (E entry) - road at ~z 2570 here, cabin 15 m S at 2585.
+  { x: 2880, yaw: Math.PI, roadYaw: Math.PI },
 ];
 
-// 30 BOULDERS -- additional hand-placed rocks on the valley floor
-// (the original 24 WHISPER_ROCKS at the hill bases are preserved).
-// Total boulders in WV = 24 + 30 = 54 (spec: 50-70). Each uses the
-// existing 'boulder' prop / coll:2.2 / collider.
+// 52 BOULDERS -- distributed naturally across the valley floor via a
+// hash-distributed pseudo-random sequence (so they don't form visible
+// 4-quadrant clusters like the previous layout did). Each is skipped
+// when within 15 m of any WV forest centre, so stones never land inside
+// the dense woods where the player can never see them. Combined with
+// the 24 hill-base clusters from 7A, total WV boulders = 24 + 30..52
+// (target ~50-70 per spec). Each uses the existing 'boulder' prop /
+// coll:2.2 / collider. Props.sectorProps() filters road-bed collisions too.
 export const WHISPER_BOULDERS = (() => {
   const a = [];
-  for (let i = 0; i < 30; i++) {
-    const q = i % 4;
-    const x0 = [1400, 2900, 1900, 2700][q];
-    const z0 = [2450, 2470, 2800, 2780][q];
-    const ang = (i * 0.71) * 6.28 + q * 1.57;
-    const r  = 30 + ((i * 13) % 130);
+  let i = 0;
+  for (let tries = 0; tries < 200 && a.length < 30; tries++, i++) {
+    const hx = 1340 + ((i * 167 + 91) % 1920);
+    const hz = 2340 + ((i * 211 + 67) % 530);
+    let ok = true;
+    for (let j = 0; j < WHISPER_FORESTS.length; j++) {
+      const f = WHISPER_FORESTS[j];
+      const dx = hx - f.x, dz = hz - f.z;
+      if (Math.sqrt(dx * dx + dz * dz) < f.r + 15) { ok = false; break; }
+    }
+    if (!ok) continue;
     a.push({
-      x: x0 + Math.cos(ang) * r,
-      z: z0 + Math.sin(ang) * r * 0.7,
-      seed: ((i + 1) * 0.61803) % 1,
-      s: 0.55 + ((i * 7) % 100) / 240,
+      x: hx, z: hz,
+      seed: ((i * 17 + 11) % 100) / 100,
+      s: 0.55 + ((i * 23) % 60) / 200,
     });
   }
   return a;
 })();
 
-// 30 fallen LOGS — flesh out forest edges and the meadow fringes.
-// Hand-placed (deterministic) — not random; that's the brief.
+// 32 fallen LOGS — distributed naturally across the whole valley
+// (not clustered around specific forest/road anchor points like before).
+// Hash-distributed positions + a 0.85-1.30 scale band so they read as
+// scattered debris across the floor and meadow edges. Skips points inside
+// forest cores where the player can't see a log.
 export const WHISPER_LOGS = (() => {
-  const pts = [
-    [1410, 2530], [1610, 2495], [1770, 2510], [1890, 2660], [2060, 2560],
-    [2210, 2500], [2310, 2720], [2450, 2540], [2600, 2670], [2740, 2530],
-    [2910, 2580], [3050, 2680], [3190, 2520], [3230, 2570], [3300, 2510],
-    [1860, 2400], [2180, 2400], [2480, 2400], [1810, 2770], [2210, 2790],
-    [2520, 2790], [2850, 2390], [1500, 2600], [1930, 2770], [3170, 2790],
-    [2100, 2780], [2660, 2390], [2540, 2770], [1700, 2470], [3100, 2400],
-  ];
   const a = [];
-  for (let i = 0; i < pts.length; i++) {
+  let i = 0;
+  for (let tries = 0; tries < 220 && a.length < 32; tries++, i++) {
+    const hx = 1340 + ((i * 131 + 47) % 1920);
+    const hz = 2340 + ((i * 199 + 73) % 530);
+    let skip = false;
+    for (let j = 0; j < WHISPER_FORESTS.length; j++) {
+      const f = WHISPER_FORESTS[j];
+      if (Math.hypot(hx - f.x, hz - f.z) < f.r + 10) { skip = true; break; }
+    }
+    if (skip) continue;
     a.push({
-      x: pts[i][0] + ((i * 17) % 11) - 5,
-      z: pts[i][1] + ((i * 23) % 13) - 6,
-      yaw: (i * 0.91) * 6.28,
-      s: 0.85 + ((i * 11) % 30) / 70,
+      x: hx, z: hz,
+      yaw: ((i * 1.91 + 0.31) * 6.28 % (2 * Math.PI)),
+      s: 0.85 + ((i * 7) % 30) / 70,
     });
   }
   return a;

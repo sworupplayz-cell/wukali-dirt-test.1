@@ -633,6 +633,56 @@ and no new shader is loaded.
 5. **Forest clearing** — walk into one of the 4 small clearings
    inside the densest pines; trees recede, the rolling floor reads.
 
+**Chapter 7C — Whisper Valley ecosystem fix.** Distribute the flora and
+make the 7B cabins discoverable from the road. The terrain, roads,
+lake and locked systems are UNCHANGED.
+
+*Forests.* The 7B forest patches were piled up around x=2150, x=2480,
+x=2820 (three pairs of pairs). 7C redistributes them as 8 single
+patches along the full 2.2 km valley, alternating N/S of the road so a
+given compass always sees wood on at least one side: 1430/2470 pine,
+1680/2710 birch, 1930/2470 pine, 2180/2710 oak, 2430/2470 pine,
+2680/2710 oak, 2930/2470 birch, 3180/2710 pine. Each is r=70-90 m
+(140-180 m diameter — within the 80-180 m width spec) with strength
+1.70-1.95 so they still dominate the cell ecosystem. Spawn-visibility:
+forest 3 (x=1930) and forest 4 (x=2180) are both within 300 m of the
+spawn at (2150, 2610), so the rider discovers a forest entrance on
+first frame.
+
+*Meadows.* 8 visible wildflower meadows (was 6) alternating N/S of the
+road so each quarter of the valley has flowers visible from the path.
+Per-instance yellow / white / purple tints in Vegetation._write() —
+the brief's "mix yellow, white and purple flowers" is now visible at
+the meadow scale, with a deterministic 3-choice palette per tuft so the
+mix is stable across rebuilds and reads as a real wildflower meadow.
+
+*Cabins.* 7B cabins were 70-150 m off the road bed — too far to
+discover by riding past. 7C places all 3 within 15 m of Whisper Path,
+doors facing the road: cabin 1 at (1900, 2645) ~15 m S of the road W
+of spawn, cabin 2 at (2400, 2645) — one of the spawn-discovery
+candidates per the brief (cabin 2 is ~250 m E of spawn), cabin 3 at
+(2880, 2585) ~15 m S of the road at the E end. Each cabin keeps its
+fenced yard + woodpile behind + bench + campfire + signpost in front
+(unchanged from 7B — all SOLID). Spawn-visibility: cabin 2 is one of
+the spawn-discovery candidates within the first 300 m.
+
+*Rocks & logs.* 7B boulders had a 4-quadrant generator that made all 30
+cluster around four anchor points (visibly quadrantal). 7C replaces that
+with a hash-distributed scatter across the entire valley floor, skipping
+points within 15 m of any forest centre so the player can always see
+them. Up to 30 boulders plus 24 hill-base clusters = 54 total (within
+the 50-70 spec). Logs went to a similar hash-distribution with
+floor-wide coverage (no more clusters at specific (x, z) anchors).
+
+*Constraints honoured.* Terrain unchanged, roads unchanged, lake
+unchanged, bike physics / camera / UI / streaming / save / quality /
+other regions all bit-identical to the prior commit. Only Landforms.js
+forests / meadows / cabins / boulders / logs ARE recomputed; the terrain
+carve / hill chains / Whisper Path road / locked systems were not
+touched.
+
+Build once. Test once. Commit message: **Whisper Valley ecosystem fix**.
+
 ## Tests
 
 ```bash

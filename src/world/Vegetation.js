@@ -1030,16 +1030,32 @@ export class Vegetation {
       // never changes shade when the window is rebuilt.
       const t = p.tint, u = 1 - t;
       const co = slot * 3;
-      if (TREE_H[p.t]) {
-        // Chapter 6B — CANOPY VARIATION. A separate curve for trees: the
-        // sward tint above is built to swing toward straw, which on a
-        // conifer just looks dead. This one runs deep blue-green to warm
-        // olive and keeps the value range narrow, so a stand reads as
-        // many individuals of one species rather than as a colour riot.
-        ic.array[co] = 0.80 + 0.34 * t;
-        ic.array[co + 1] = 0.92 + 0.14 * u;
-        ic.array[co + 2] = 0.94 - 0.26 * t;
-      } else {
+    if (TREE_H[p.t]) {
+      // Chapter 6B — CANOPY VARIATION. A separate curve for trees: the
+      // sward tint above is built to swing toward straw, which on a
+      // conifer just looks dead. This one runs deep blue-green to warm
+      // olive and keeps the value range narrow, so a stand reads as
+      // many individuals of one species rather than as a colour riot.
+      ic.array[co] = 0.80 + 0.34 * t;
+      ic.array[co + 1] = 0.92 + 0.14 * u;
+      ic.array[co + 2] = 0.94 - 0.26 * t;
+    } else if (p.t === 'flower') {
+      // Chapter 7C: meadow flowers visibly mix yellow/white/purple per
+      // instance. Hash the plant position so each TUFT picks one of three
+      // palette entries -- yellow (1.00, 0.92, 0.18), white (0.98,
+      // 0.98, 0.98), purple (0.62, 0.42, 0.95) -- so every visible
+      // meadow reads as a true three-colour mix and never a wall of one
+      // tint.
+      const fpal = [
+        [1.00, 0.92, 0.18],  // yellow
+        [0.98, 0.98, 0.98],  // white
+        [0.62, 0.42, 0.95],  // purple
+      ];
+      const k = (Math.floor(p.tint * 31) + Math.floor(p.tint * 71)) % 3;
+      ic.array[co    ] = fpal[k][0];
+      ic.array[co + 1] = fpal[k][1];
+      ic.array[co + 2] = fpal[k][2];
+    } else {
         ic.array[co] = 0.86 + 0.3 * t;
         ic.array[co + 1] = 0.9 + 0.2 * u;
         ic.array[co + 2] = 0.82 + 0.26 * t * u * 2;
