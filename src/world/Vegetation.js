@@ -128,11 +128,58 @@ export class Vegetation {
     this.zones = buildZones(field);
   }
 
+  /**
+   * Debug report (hotfix 5B.2). Returns what the vegetation system is
+   * actually feeding the GPU right now: instances per family, the cells
+   * in the streamed window, the render radii and the nearest tree. Call
+   * `world.vegetation.debugReport()` from the console.
+   */
+  debugReport(px = this._pcx * CELL, pz = this._pcz * CELL) {
+    const fam = { trees: 0, bushes: 0, sward: 0, detail: 0 };
+    let near = 0, far = 0, nearest = Infinity;
+    for (const [k, m] of Object.entries(this._near)) {
+      near += m.count;
+      if (TREES.includes(k)) fam.trees += m.count;
+      else if (BUSHES.includes(k)) fam.bushes += m.count;
+      else if (SWARD[k]) fam.sward += m.count;
+      else fam.detail += m.count;
+      if (TREES.includes(k)) {
+        const a = m.instanceMatrix.array;
+        for (let i = 0; i < m.count; i++) {
+          const d = Math.hypot(a[i * 16 + 12] - px, a[i * 16 + 14] - pz);
+          if (d < nearest) nearest = d;
+        }
+      }
+    }
+    for (const m of Object.values(this._far)) far += m.count;
+    const meshes = Object.values(this._near).concat(Object.values(this._far));
+    return {
+      instancesNear: near, instancesFar: far, families: fam,
+      activeCells: (this._farR * 2 + 1) ** 2, cellsCached: this._cellCache.size,
+      nearRadiusM: NEAR_R * CELL, farRadiusM: this._farR * CELL,
+      groundRadiusM: GROUND_R * CELL,
+      density: this._density, noCull: !!this.debugNoCull,
+      meshesInScene: meshes.filter((m) => m.parent).length, meshesTotal: meshes.length,
+      nearestTreeM: nearest === Infinity ? null : +nearest.toFixed(1),
+    };
+  }
+
+  /** Debug: drop the culling + thinning rules and rebuild (A/B testing). */
+  debugSetCulling(on) {
+    this.debugNoCull = !on;
+    if (this._pcx !== null) this._rebuild(this._pcx, this._pcz, Infinity);
+  }
+
   /** Graphics quality hook: density in [0,1] + far ring radius (cells). */
   setQuality(density, farR) {
-    if (density === this._density && farR === this._farR) return;
+    const far = Math.max(NEAR_R + 1, Math.min(FAR_R, farR));
+    if (density === this._density && far === this._farR) return;
     this._density = density;
-    this._farR = Math.max(NEAR_R, Math.min(FAR_R, farR));
+    // HOTFIX 5B.2: at the low quality tiers the requested impostor ring
+    // was the SAME radius as the full-detail ring, which meant no distant
+    // trees at all — the horizon went bare and the world read as empty.
+    // The ring is now always at least one cell beyond the near ring.
+    this._farR = far;
     if (this._pcx !== null) this._rebuild(this._pcx, this._pcz, Infinity);
   }
 
@@ -179,7 +226,12 @@ export class Vegetation {
       const g = this._growing[i];
       const t = (now - g.t0) / 450;
       const mesh = this._near[g.type];
-      if (g.slot >= mesh.count) continue; // ring rebuilt since; drop
+      // HOTFIX 5B.2: instance slots are reassigned on every window
+      // rebuild, so an animation started before the last rebuild would
+      // write ITS plant's transform into whatever now owns that slot —
+      // a tree visibly jumping or shrinking away. Entries are stamped
+      // with the rebuild they belong to and dropped when it moves on.
+      if (g.ver !== this._rebuildVer || g.slot >= mesh.count) continue;
       const k = t >= 1 ? 1 : 1 - (1 - t) * (1 - t); // ease-out
       this._write(mesh, g.slot, g.p, 0.25 + 0.75 * k);
       mesh.instanceMatrix.needsUpdate = true;
@@ -555,6 +607,7 @@ export class Vegetation {
     if (budgetMs === Infinity) this._job = null; // drop any partial job
     let pending = false;
     let swardDone = false; // at most one dense sward cell per frame
+    this._rebuildVer = (this._rebuildVer || 0) + 1;
     if (!this._growing) this._growing = [];
     const nearCounts = {}, farCounts = {};
     for (const t of TYPES) nearCounts[t] = 0;
@@ -597,10 +650,18 @@ export class Vegetation {
         for (let pi = 0; pi < nPlants; pi++) {
           const p = plants[pi];
           // Density thinning: deterministic per-plant keep test.
-          if (den < 1 && hash01(pi, p.x | 0, 0x5c1) > den) continue;
+          //
+          // HOTFIX 5B.2 — the quality setting used to thin EVERYTHING by
+          // the same fraction, so a phone preset (25%) deleted three out
+          // of four TREES. Trees are the silhouette of the world; grass
+          // is filler. Ground cover now takes the full cut and woody
+          // plants keep at least 80% of their number, which is what a
+          // low-end device should be spending its instances on.
+          const den2 = this.debugNoCull ? 1 : (TRUNKED[p.t] ? Math.max(0.8, den) : den);
+          if (den2 < 1 && hash01(pi, p.x | 0, 0x5c1) > den2) continue;
           if (nearRing) {
             // Ground cover is culled to the inner ring.
-            if (!groundRing && SWARD[p.t]) continue;
+            if (!groundRing && SWARD[p.t] && !this.debugNoCull) continue;
             const n = nearCounts[p.t];
             if (n >= CAP_NEAR[p.t]) continue;
             this._write(this._near[p.t], n, p, 1);
@@ -610,7 +671,7 @@ export class Vegetation {
             // Smooth LOD swap: plants in cells that just became near
             // grow in over ~0.45 s instead of appearing at full scale.
             if (isNewNear && p.tree && this._growing.length < 220) {
-              this._growing.push({ type: p.t, slot: n, p, t0: growNow });
+              this._growing.push({ type: p.t, slot: n, p, t0: growNow, ver: this._rebuildVer });
             }
           } else if (CAP_FAR[p.t] !== undefined) {
             const n = farCounts[p.t];
@@ -988,14 +1049,18 @@ function buildZones(field) {
     return true;
   };
 
-  // Four patches ringing the spawn meadow, so forest is visible in every
-  // direction from the first frame.
-  for (let i = 0; i < 4; i++) {
-    const a = (i / 4) * 6.283 + 0.7;
+  // SPAWN PATCHES (hotfix 5B.2): six patches ringing Rider's Meadow, the
+  // inner ones placed so their lobes reach over the spawn point itself —
+  // the player starts INSIDE a forest patch, with only the 46 m practice
+  // core kept clear. Forest is therefore visible in every direction from
+  // the very first frame, at any quality setting.
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * 6.283 + 0.55;
+    const inner = i % 2 === 0;
     for (let att = 0; att < 4; att++) {
-      const d = 210 + att * 55;
+      const d = (inner ? 150 : 240) + att * 50;
       if (push(4000 + Math.cos(a) * d, 2500 + Math.sin(a) * d,
-        130 + hash01(i, att, 0x41) * 90, 0, 150)) break;
+        (inner ? 190 : 140) + hash01(i, att, 0x41) * 60, 0, 120)) break;
     }
   }
   // ...and the rest of the map on a jittered 7 x 5 grid (35 slots).

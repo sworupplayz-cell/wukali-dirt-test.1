@@ -164,6 +164,37 @@ walks only each cell's tree prefix. Colour variation is per-INSTANCE
 shades without a second material or draw call. Measured streaming cost
 over a 90 s ride: 855 ms total, p95 0.2 ms, p99 3.1 ms per frame.
 
+**Hotfix 5B.2 — vegetation render fix.** The world measured full but
+looked empty, so the vegetation system was instrumented rather than
+re-tuned. `world.vegetation.debugReport()` now returns exactly what the
+GPU is being fed (instances per family, active cells, render radii,
+nearest tree, scene attachment) and `debugSetCulling(false)` drops the
+culling and thinning rules for A/B comparison. The audit cleared the
+usual suspects — 29/29 instanced meshes attached and visible, no
+instance-capacity clipping, and the spawn exclusion mask removing zero
+trees — and found three real defects:
+
+1. **Quality thinning was applied to trees.** A phone preset (25%)
+   deleted three out of four *trees*, not just grass — the silhouette of
+   the world went with the filler. Ground cover now takes the full cut
+   and woody plants keep at least 80%: the tree line is ~212-272
+   instances at *every* tier instead of collapsing to ~70.
+2. **The impostor ring collapsed into the near ring** at the low tiers
+   (requested radius 2 cells == the full-detail radius), so those presets
+   drew *no* distant trees at all and the horizon was bare. The far ring
+   is now always at least one cell beyond the near ring.
+3. **Stale grow-in animations wrote into reassigned instance slots.**
+   Slots are reallocated on every window rebuild, so an in-flight
+   grow-in could stamp its own plant's transform over whatever now owned
+   that slot — a tree visibly jumping or shrinking away. Entries are now
+   versioned against the rebuild.
+
+Render distances: full models to **250 m**, impostors to 375-500 m,
+ground cover to 125 m. Six patches now ring Rider's Meadow with their
+lobes reaching over the spawn point, so the player starts *inside* a
+forest patch: **44 trees rendered within 120 m and 130 within 250 m even
+on the potato preset**, with trees in all eight compass sectors.
+
 **Hotfix 5B.1 — spawn and forest patches.** Two rounds of audit fixed a
 world that measured full but looked empty. First: 18% of rideable ground
 was more than 150 m from a tree (5% beyond 300 m, worst hole 848 m) — now
