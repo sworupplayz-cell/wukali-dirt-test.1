@@ -238,6 +238,17 @@ export class Vegetation {
     // ...and OUTSIDE the zones the plains still get a floor of scattered
     // trees and brush, so no stretch of rideable ground is bare.
     if (nTrees < 2 && hCell >= 50 && hCell < 900) nTrees = 2;
+    // THE SPAWN VALLEY (hotfix 5B.1). The first thing the player sees can
+    // never be an empty field: the meadow bowl gets a guaranteed budget of
+    // groves and ground detail, thinning back to the normal world by
+    // ~500 m out. The road corridors keep the riding lines clear.
+    const dsx = ox + CELL * 0.5 - 4000, dsz = oz + CELL * 0.5 - 2465;
+    const dSpawn = Math.hypot(dsx, dsz);
+    if (dSpawn < 520) {
+      const k = 1 - sstep(180, 520, dSpawn);
+      nTrees = Math.max(nTrees, Math.round(9 + 11 * k));
+      nGround = Math.max(nGround, Math.round(14 + 10 * k));
+    }
 
     // FOREST STRUCTURE (Chapter 5B). Each cell holds a handful of stands.
     // A stand has a dense core and a thinning edge (the scatter radius is
@@ -284,11 +295,14 @@ export class Vegetation {
     // candidates before the expensive work starts.
     const dmx = x - 4000, dmz = z - 2500;
     const dMeadow2 = dmx * dmx + dmz * dmz;
-    // Rider's Meadow: only the groomed practice core (32 m) stays clear.
+    // Rider's Meadow: only the groomed practice core stays clear — 32 m
+    // for sward, 46 m for trunks. Everything beyond that is the spawn
+    // VALLEY: groves, brush, flowers and stone right up to the meadow
+    // rim, with the road corridors keeping the riding lines open.
     // Sward returns immediately outside it and light trees from 200 m, so
     // the player spawns in a meadow that is visibly surrounded by
     // vegetation rather than on an empty plain.
-    const meadowOk = isTree ? dMeadow2 >= 200 * 200 : dMeadow2 >= 32 * 32;
+    const meadowOk = isTree ? dMeadow2 >= 46 * 46 : dMeadow2 >= 32 * 32;
     // Roads keep a clear riding corridor: 11 m for anything with a trunk,
     // 6 m for sward, so the verge is alive but the bed never is.
     const clearNeed = isTree ? 11 : 6;
@@ -442,7 +456,10 @@ export class Vegetation {
         r: 16 + rng() * 30, seed: rng(),
       });
     }
-    const n = 60 + (rng() * 30 | 0);
+    // The spawn valley gets roughly double the close-range detail: this
+    // is the first thing the player ever sees.
+    const nearSpawn = Math.hypot(ox + CELL * 0.5 - 4000, oz + CELL * 0.5 - 2465) < 320;
+    const n = (nearSpawn ? 130 : 60) + (rng() * 30 | 0);
     for (let i = 0; i < n; i++) {
       const d = drifts[(rng() * drifts.length) | 0];
       const ang = rng() * 6.283, rad = d.r * Math.pow(rng(), 0.55);
@@ -458,8 +475,23 @@ export class Vegetation {
       const e = 5;
       const sl = Math.hypot(f.height(x + e, z) - h, f.height(x, z + e) - h) / e;
       if (sl > 0.5) continue;
-      const r = rng();
+      const r = rng(), rr = rng();
       let t;
+      // MEADOW DETAIL (hotfix 5B.1): the close-range mix also carries
+      // ferns, small bushes, fallen logs and mossy stones. All of it
+      // lives inside the ~190 m culling ring, so it is detail the player
+      // actually sees rather than instances burned on the horizon.
+      // Bushes, ferns, logs and stones read from much further away than
+      // a grass tuft, so the close-range mix carries a healthy share.
+      if (rr > (nearSpawn ? 0.78 : 0.9) && h < 900) {
+        t = rr > 0.975 ? 'logFallen' : rr > 0.95 ? 'mossRock'
+          : rr > 0.9 ? 'fern' : rr > 0.85 ? 'bush' : 'shrub';
+        const s2 = t === 'logFallen' ? 0.85 + rng() * 0.35 : 0.8 + rng() * 0.5;
+        const y2 = Math.min(h, f.height(x + 0.7, z), f.height(x, z + 0.7)) - 0.06 * s2;
+        list.push({ t, x, z, y: y2, yaw: rng() * 6.283, s: s2,
+          tint: hash01(x | 0, z | 0, 0x51ce), tree: false });
+        continue;
+      }
       if (h > 900) t = r < 0.7 ? 'alpineGrass' : 'tussock';
       else if (h > 150) t = r < 0.45 ? 'tussock' : r < 0.8 ? 'grass' : 'alpineGrass';
       else if (flowerZone && r > 0.35) {
@@ -915,45 +947,68 @@ const TINTED = {};
 for (const t of [...GRASSES, ...FLOWERS, ...BUSHES, 'clover', 'fern', 'mossRock']) TINTED[t] = true;
 
 /**
- * ECOSYSTEM ZONES (hotfix: populate the world).
+ * FOREST PATCHES (hotfix 5B.1).
  *
- * The noise-driven forest field left 18% of the rideable map more than
- * 150 m from the nearest tree and 5% more than 300 m — big empty plains.
- * This lays 20-30 named ecosystems across the 40 km2 map on a jittered
- * coarse grid (so they are spread, never clumped or aligned), each
- * 150-400 m across, and every one multiplies the local plant budget and
- * biases its species mix. Deterministic: same world every launch.
+ * 25-35 patches of woodland spread over the 40 km2 map. A patch is NOT a
+ * circle: its radius is modulated by three angular harmonics, so the
+ * outline is a lobed, irregular shape. Inside, density falls from a dense
+ * core to a natural edge and one patch in three carries an interior
+ * clearing. Placement is a jittered coarse grid (never aligned), and four
+ * extra patches ring Rider's Meadow so the player spawns inside a valley
+ * with woods in every direction instead of an empty field.
  */
 function buildZones(field) {
   const lf = field.landforms;
   const zones = [];
-  const COLS = 8, ROWS = 4;                 // 32 slots -> 24-30 zones
-  const cw = 8000 / COLS, ch = 5000 / ROWS; // the fixed 40 km2 world
+  const info = { h: 0, trail: 0, moist: 0, mtn: 0, roadType: 0 };
+  const push = (x, z, r, seedA, minMeadow) => {
+    const h = field.height(x, z);
+    if (h < 52 || h > 620) return false;
+    if (lf.inWater(x, z)) return false;
+    if (Math.hypot(x - 4000, z - 2500) < minMeadow) return false;
+    const e = 9;
+    const sl = Math.hypot(field.height(x + e, z) - field.height(x - e, z),
+      field.height(x, z + e) - field.height(x, z - e)) / (2 * e);
+    if (sl > 0.5) return false;
+    field.sample(x, z, info);
+    const kind = h > 200 ? 'pine'
+      : h > 110 ? 'mixed'
+        : info.moist > 0.52 ? 'flower'
+          : hash01(x | 0, z | 0, 0x2a15) < 0.5 ? 'birch' : 'thicket';
+    zones.push({
+      x, z, r, kind,
+      strength: 0.9 + hash01(x | 0, z | 0, 0x2a14) * 0.55,
+      // Lobed outline: three harmonics, so no patch is a disc.
+      a1: hash01(x | 0, z | 0, 0x31) * 6.283, k1: 0.16 + hash01(x | 0, z | 0, 0x32) * 0.16,
+      a2: hash01(x | 0, z | 0, 0x33) * 6.283, k2: 0.08 + hash01(x | 0, z | 0, 0x34) * 0.12,
+      a3: hash01(x | 0, z | 0, 0x35) * 6.283,
+      // Interior clearing in one patch out of three.
+      clear: hash01(x | 0, z | 0, 0x36) < 0.34 ? 0.18 + hash01(x | 0, z | 0, 0x37) * 0.2 : 0,
+    });
+    return true;
+  };
+
+  // Four patches ringing the spawn meadow, so forest is visible in every
+  // direction from the first frame.
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * 6.283 + 0.7;
+    for (let att = 0; att < 4; att++) {
+      const d = 210 + att * 55;
+      if (push(4000 + Math.cos(a) * d, 2500 + Math.sin(a) * d,
+        130 + hash01(i, att, 0x41) * 90, 0, 150)) break;
+    }
+  }
+  // ...and the rest of the map on a jittered 7 x 5 grid (35 slots).
+  const COLS = 7, ROWS = 5;
+  const cw = 8000 / COLS, ch = 5000 / ROWS;
   for (let i = 0; i < COLS; i++) {
     for (let j = 0; j < ROWS; j++) {
-      // Two jitter attempts per slot so a slot rejected on water or rock
-      // still gets a chance to place its ecosystem somewhere nearby.
       for (let att = 0; att < 3; att++) {
         const jx = hash01(i, j, 0x2a11 + att * 7), jz = hash01(i, j, 0x2a12 + att * 7);
         const x = (i + 0.12 + jx * 0.76) * cw;
         const z = (j + 0.12 + jz * 0.76) * ch;
-        const h = field.height(x, z);
-        if (h < 52 || h > 620) break;                    // sea floor / high rock
-        if (lf.inWater(x, z)) continue;
-        if (Math.hypot(x - 4000, z - 2500) < 430) continue; // spawn meadow stays open
-        const e = 9;
-        const sl = Math.hypot(field.height(x + e, z) - field.height(x - e, z),
-          field.height(x, z + e) - field.height(x, z - e)) / (2 * e);
-        if (sl > 0.5) continue;
-        const info = { h: 0, trail: 0, moist: 0, mtn: 0, roadType: 0 };
-        field.sample(x, z, info);
-        const r = 75 + hash01(i, j, 0x2a13) * 125;       // 150-400 m WIDE
-        const kind = h > 200 ? 'pine'
-          : h > 110 ? 'mixed'
-            : info.moist > 0.52 ? 'flower'
-              : hash01(i, j, 0x2a15) < 0.5 ? 'birch' : 'thicket';
-        zones.push({ x, z, r, kind, strength: 0.85 + hash01(i, j, 0x2a14) * 0.6 });
-        break;
+        const r = 120 + hash01(i, j, 0x2a13) * 130;   // 120-250 m radius
+        if (push(x, z, r, 0, 430)) break;
       }
     }
   }
@@ -965,10 +1020,19 @@ function zoneAt(zones, x, z) {
   let best = null, bestW = 0;
   for (let i = 0; i < zones.length; i++) {
     const zo = zones[i];
-    const d = Math.hypot(x - zo.x, z - zo.z);
-    if (d >= zo.r) continue;
-    // Dense core, thinning to the rim.
-    const w = (1 - sstep(zo.r * 0.45, zo.r, d)) * zo.strength;
+    const dx = x - zo.x, dz = z - zo.z;
+    const d = Math.hypot(dx, dz);
+    if (d >= zo.r * 1.35) continue;
+    // Lobed boundary: the effective radius swings with the bearing, so
+    // the patch reads as a wood with bays and headlands, not a disc.
+    const th = Math.atan2(dz, dx);
+    const R = zo.r * (1 + zo.k1 * Math.sin(th * 2 + zo.a1)
+      + zo.k2 * Math.sin(th * 3 + zo.a2) + 0.07 * Math.sin(th * 5 + zo.a3));
+    if (d >= R) continue;
+    const rel = d / R;
+    if (zo.clear && rel < zo.clear) continue;   // interior clearing
+    // Dense core, thinning to a natural edge.
+    const w = (1 - sstep(0.42, 1, rel)) * zo.strength;
     if (w > bestW) { bestW = w; best = zo; }
   }
   return best ? { zone: best, w: bestW } : null;

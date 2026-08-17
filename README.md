@@ -164,20 +164,24 @@ walks only each cell's tree prefix. Colour variation is per-INSTANCE
 shades without a second material or draw call. Measured streaming cost
 over a 90 s ride: 855 ms total, p95 0.2 ms, p99 3.1 ms per frame.
 
-**Hotfix — populate the world.** An audit of the first pass showed the
-map was still too empty: 18% of rideable ground was more than 150 m from
-the nearest tree, 5% more than 300 m, with an 848 m hole. Three changes
-fixed it: **23 ecosystem zones** (150-400 m wide) laid on a jittered
-coarse grid across the 40 km2 map, each multiplying its local plant
-budget and stamping its own character (pine wood, mixed wood, birch
-grove, flower field, bush thicket); a **density floor** so no plantable
-cell is bare; and a **dense on-demand sward** generated only for the
-cells inside the ~190 m culling ring, one cell per frame. Grass models
-were rebuilt from crossed rectangles (which read as cardboard from the
-saddle) into clusters of tapered blades — better looking and fewer
-triangles. Result: **0% of rideable ground is more than 300 m from a
-tree**, 0.7% beyond 150 m, p95 89 m, and the spawn meadow now holds
-~750 plants inside the culling ring.
+**Hotfix 5B.1 — spawn and forest patches.** Two rounds of audit fixed a
+world that measured full but looked empty. First: 18% of rideable ground
+was more than 150 m from a tree (5% beyond 300 m, worst hole 848 m) — now
+**0% is beyond 300 m** and 0.7% beyond 150 m (p95 89 m). Second: the
+spawn itself. The scattered-tree model was replaced by **28 forest
+patches** of 140-250 m radius, each with a lobed (never circular)
+boundary from three angular harmonics, a dense core, a natural edge and
+an interior clearing in one patch out of three, laid on a jittered grid
+so nothing is aligned. Four of them ring Rider's Meadow, and the spawn
+bowl carries a guaranteed budget of groves and ground detail: **59 trees,
+28 bushes and ~64 flowers/grass clumps within 120 m of the spawn**, with
+mature trees in all eight compass sectors (235 within 300 m). Close-range
+detail — ferns, small bushes, fallen logs, mossy stones and wildflower
+drifts — is generated on demand only for cells inside the ~190 m culling
+ring, one cell per frame, so the density the player sees costs nothing at
+range. Grass models were rebuilt from crossed rectangles (cardboard from
+the saddle) into clusters of tapered blades: better looking and fewer
+triangles.
 
 The palette gained three-scale grass variation, finer rock strata,
 moisture-driven ground-tint blending and a slow ambient hue drift — no
