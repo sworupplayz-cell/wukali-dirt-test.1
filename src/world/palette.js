@@ -35,10 +35,13 @@ export function colorFor(info, out, x = 0, z = 0) {
   const canyon = x < 1300 && z > 1400 && z < 3800 ? sstep(1150, 700, x) : 0;
   const basalt = x > 6900 && z > 1700 && z < 4100 ? sstep(7100, 7500, x) : 0;
 
-  // Grass patchiness: broad meadow/sedge patches + fine tussock speckle.
+  // Grass patchiness (Chapter 5B: three scales instead of two). Broad
+  // meadow/sedge patches, a mid-scale sward break-up that matches the
+  // size of a vegetation stand, and fine tussock speckle.
   const patch = vnoise(x * 0.008 + 5.2, z * 0.008 - 3.7, 911) - 0.5;
+  const stand = vnoise(x * 0.021 - 9.4, z * 0.021 + 2.8, 915) - 0.5;
   const speck = vnoise(x * 0.045 + 1.3, z * 0.045 + 8.6, 913) - 0.5;
-  const gv = patch * 0.10 + speck * 0.05;
+  const gv = patch * 0.11 + stand * 0.07 + speck * 0.05;
 
   // Lowland grass (variation shifts hue between lush and straw).
   let r = 0.50 - 0.20 * m + gv * 0.9;
@@ -58,7 +61,10 @@ export function colorFor(info, out, x = 0, z = 0) {
   // Alpine rock band with strata variation.
   const rock = sstep(260, 720, h);
   if (rock > 0) {
-    const strata = (vnoise(x * 0.006 + h * 0.004, z * 0.006, 917) - 0.5) * 0.09;
+    // Rock colour variation: bedding planes plus a finer grain break-up,
+    // so a face is never one flat grey.
+    const strata = (vnoise(x * 0.006 + h * 0.004, z * 0.006, 917) - 0.5) * 0.11 +
+      (vnoise(x * 0.038 + 4.1, z * 0.038 - 6.3, 921) - 0.5) * 0.05;
     r += (0.46 + 0.05 * m + strata - r) * rock;
     g += (0.42 + 0.04 * m + strata - g) * rock;
     b += (0.38 + 0.03 * m + strata * 0.7 - b) * rock;
@@ -146,11 +152,21 @@ export function colorFor(info, out, x = 0, z = 0) {
     }
   }
 
-  // Ambient wash: very large-scale warm/cool tint (readable regions).
+  // Chapter 5B — GROUND TINT BLENDING. Moisture drifts the whole surface
+  // between a warm dry cast and a cool damp one, which ties the grass,
+  // dirt and stone bands into one landscape instead of three palettes.
+  const damp = m - 0.5;
+  r -= damp * 0.045;
+  g += damp * 0.020;
+  b += damp * 0.050;
+
+  // Ambient wash: very large-scale warm/cool tint (readable regions),
+  // with a slower hue drift on top so no two valleys read identically.
   const wash = vnoise(x * 0.0009 + 21.5, z * 0.0009 - 14.2, 923) - 0.5;
-  r += wash * 0.035;
-  g += wash * 0.015;
-  b -= wash * 0.03;
+  const drift = vnoise(x * 0.00035 - 7.7, z * 0.00035 + 12.4, 927) - 0.5;
+  r += wash * 0.035 + drift * 0.030;
+  g += wash * 0.015 + drift * 0.012;
+  b -= wash * 0.030 + drift * 0.022;
 
   // Chapter 5 — CLOUD SHADOWS. Soft 700 m patches of cooler, darker
   // ground drifting across the whole map (static in world space, so the

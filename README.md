@@ -120,45 +120,53 @@ Every feature is a smooth analytic blob (quartic falloff / smoothstep
 rims) and corridor-aware, so none of them can add a wall or bend a road
 past its grade limit.
 
-**Chapter 5B** populates that terrain with an ecosystem — vegetation
-only; terrain, roads, physics, camera, UI, streaming and the save system
-are untouched:
+**Chapter 5B** populates that terrain with a living ecosystem — vegetation
+and environmental detail only; terrain, roads, physics, camera, UI,
+streaming and the save system are untouched.
 
-- **20 plant models in five families**: 5 trees (pine, fir, oak, birch,
-  dead), 4 bushes (bush, shrub, fern, juniper), 6 grasses (meadow grass,
-  tall grass, sedge, tussock, reed, alpine grass), 3 wildflower colours
-  (yellow, purple, white) and 2 fallen logs — plus 4 rock-cluster
-  arrangements (field, cairn, talus spill, ring) built from the existing
-  instanced rock models, so they cost no extra draw call.
-- **Clustered placement, never a grid**: each 125 m cell picks 2-4 clumps
-  with their own radius and every plant is scattered inside one of them
-  with a sqrt-distributed radius, so the ground between clumps stays
-  open. A clump's seed also picks which wildflower colour dominates it,
-  which is why drifts come out single-coloured.
-- **Biomes**: conifer belt above 150 m, lowland broadleaf below it, dead
-  snags in dry ground, ferns and juniper on the forest floor, tussock in
-  the dry basins, reeds and sedge on the lake shores, alpine mat above
-  900 m, fallen timber only inside real woodland.
-- **Denser with elevation**: elevation biases the forest *field* itself,
-  so whole hillsides turn wooded (about 5.5 trees per cell in the
-  lowland, 7.3 in the 100-200 m belt, thinning again at the tree line),
-  and the slope gate opens for conifers so they can hold a real flank.
-- **Roads and viewpoints stay clear**: 11 m off every bed, and nothing is
-  planted within 46 m of a viewpoint so the view stays open. Nothing
-  grows in a lake.
-- **Optimisation**: GPU instancing (one InstancedMesh per model), two
-  shared materials, fixed-capacity instance pools, LOD impostors past
-  250 m, and ground cover culled to the inner ~190 m ring. Instance
-  transforms are written straight into the instance buffer (sixteen
-  float stores instead of a Vector3/Euler/Quaternion/Matrix4 chain per
-  plant), and the far ring iterates only each cell's tree prefix. No
-  texture anywhere is above 512 px; vegetation is untextured. Two placement bugs surfaced and were fixed on the
-way: roadside fences could stand across a curving bed (a 6 m solid run
-offset only by the half-width) and a viewpoint platform could land on the
-road — both now verify clearance before placing. Road beds are relaxed onto the ground under a fill cap instead of
-being propped on 500 m pedestals, and the Eagle Approach serpentine was
-re-laid onto the rebuilt flank with its summit pinned to the pass saddle,
-so the marquee climb is a genuine 1.5 km switchback ascent again.
+**24 instanced models, five families, two shared materials**
+
+| family | models |
+| --- | --- |
+| trees (5) | pine, fir, oak, birch, dead tree |
+| bushes (4) | small shrub, round bush, mountain bush, dry bush |
+| grasses (6) | meadow grass, tall grass, sedge, tussock, reed, alpine grass |
+| wildflowers (3) | yellow, purple, white |
+| ground | fern patches, clover patches |
+| detail | fallen log, mossy log, tree stump, moss rock (+ 4 rock-cluster arrangements in the prop layer) |
+
+**Ecosystems, not scatter.** Every 125 m cell lays 2-4 *stands*, each with
+a dense core and a thinning edge (radius `r * u^0.9`, not the uniform
+`r * sqrt(u)`), and one stand in three carries a clearing — an empty
+middle that reads as a glade. Nothing is grid-aligned, rotation is
+random and scale is 0.85-1.25. A stand also picks its own wildflower
+colour, its own third sward species and its own kind of forest debris,
+so a wood shows logs *or* stumps *or* mossy boulders rather than all
+four at once.
+
+Zones follow the brief: the spawn valley is open meadow (groomed core
+clear, sward from 130 m, light trees past 260 m), the rolling hills are
+mixed broadleaf woods with bushes and stone, the mountain slopes above
+150 m are dense pine and fir with little sward and more rock, the ridge
+crests stay sparse and every viewpoint keeps a 46 m clear bowl. Roads
+keep a clear corridor — 11 m for anything with a trunk, 6 m for sward —
+and nothing is planted within 26 m of a cabin, cave, bridge or arch.
+Lake shores carry reeds, sedge and the occasional birch.
+
+**Optimisation.** GPU instancing (one InstancedMesh per model, no
+individual tree meshes), two shared materials, fixed-capacity instance
+pools inside the existing chunk streaming, tree impostors past 250 m and
+ground cover culled to the inner ~190 m ring. Instance transforms are
+written straight into the instance buffer (sixteen float stores instead
+of a Vector3/Euler/Quaternion/Matrix4 chain per plant) and the far ring
+walks only each cell's tree prefix. Colour variation is per-INSTANCE
+(`instanceColor`), so a whole meadow of one mesh comes out in a hundred
+shades without a second material or draw call. Measured streaming cost
+over a 90 s ride: 855 ms total, p95 0.2 ms, p99 3.1 ms per frame.
+
+The palette gained three-scale grass variation, finer rock strata,
+moisture-driven ground-tint blending and a slow ambient hue drift — no
+lighting changes. No texture anywhere exceeds 512 px.
 
 ## Tech
 
