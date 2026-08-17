@@ -164,6 +164,21 @@ walks only each cell's tree prefix. Colour variation is per-INSTANCE
 shades without a second material or draw call. Measured streaming cost
 over a 90 s ride: 855 ms total, p95 0.2 ms, p99 3.1 ms per frame.
 
+**Hotfix — populate the world.** An audit of the first pass showed the
+map was still too empty: 18% of rideable ground was more than 150 m from
+the nearest tree, 5% more than 300 m, with an 848 m hole. Three changes
+fixed it: **23 ecosystem zones** (150-400 m wide) laid on a jittered
+coarse grid across the 40 km2 map, each multiplying its local plant
+budget and stamping its own character (pine wood, mixed wood, birch
+grove, flower field, bush thicket); a **density floor** so no plantable
+cell is bare; and a **dense on-demand sward** generated only for the
+cells inside the ~190 m culling ring, one cell per frame. Grass models
+were rebuilt from crossed rectangles (which read as cardboard from the
+saddle) into clusters of tapered blades — better looking and fewer
+triangles. Result: **0% of rideable ground is more than 300 m from a
+tree**, 0.7% beyond 150 m, p95 89 m, and the spawn meadow now holds
+~750 plants inside the culling ring.
+
 The palette gained three-scale grass variation, finer rock strata,
 moisture-driven ground-tint blending and a slow ambient hue drift — no
 lighting changes. No texture anywhere exceeds 512 px.

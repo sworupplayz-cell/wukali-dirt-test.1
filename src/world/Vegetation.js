@@ -65,12 +65,12 @@ for (const t of [...BUSHES, ...GRASSES, ...FLOWERS, ...GROUND, ...DETAIL]) COLL[
 const CAP_NEAR = {
   pine: 560, fir: 460, birch: 200, oak: 160, dead: 110,
   shrub: 200, bush: 240, mountainBush: 160, dryBush: 180,
-  grass: 420, grassTall: 300, sedge: 220, tussock: 240, reed: 140, alpineGrass: 200,
-  flowerY: 200, flowerP: 170, flowerW: 150,
-  fern: 220, clover: 260,
+  grass: 900, grassTall: 620, sedge: 320, tussock: 520, reed: 160, alpineGrass: 380,
+  flowerY: 420, flowerP: 360, flowerW: 320,
+  fern: 240, clover: 460,
   logFallen: 70, logMossy: 60, stump: 90, mossRock: 140,
 };
-const CAP_FAR = { pine: 1300, fir: 1050, birch: 550, oak: 420, dead: 300 };
+const CAP_FAR = { pine: 1050, fir: 850, birch: 500, oak: 380, dead: 260 };
 
 export class Vegetation {
   constructor(scene, field) {
@@ -124,6 +124,8 @@ export class Vegetation {
     this._pcz = null;
     this._density = 1;   // Chapter 3C: fraction of plants kept
     this._farR = FAR_R;  // Chapter 3C: impostor ring radius (cells)
+    // HOTFIX: ecosystem zones — the backbone of world population.
+    this.zones = buildZones(field);
   }
 
   /** Graphics quality hook: density in [0,1] + far ring radius (cells). */
@@ -222,8 +224,20 @@ export class Vegetation {
     // The conifer belt carries a real forest: its stands are allowed up
     // to 40 trees a cell, roughly double the lowland woods.
     const cap = 22 + 18 * sstep(0.45, 0.85, elev);
-    const nTrees = woods > 0 ? Math.min(cap | 0, (3 + woods * 34 * (0.7 + 0.9 * elev)) | 0) : 0;
-    const nGround = 10 + (rng() * 5 | 0);
+    let nTrees = woods > 0 ? Math.min(cap | 0, (3 + woods * 34 * (0.7 + 0.9 * elev)) | 0) : 0;
+    let nGround = 11 + (rng() * 5 | 0);
+    // HOTFIX: an ECOSYSTEM ZONE over this cell multiplies its budget and
+    // sets the species mix...
+    const zh = zoneAt(this.zones, ox + CELL * 0.5, oz + CELL * 0.5);
+    const zoneKind = zh ? zh.zone.kind : null;
+    if (zh) {
+      const k = 1 + 2.4 * zh.w;
+      nTrees = Math.min(38, Math.round((nTrees + 3) * k));
+      nGround = Math.round(nGround * (1 + 0.9 * zh.w));
+    }
+    // ...and OUTSIDE the zones the plains still get a floor of scattered
+    // trees and brush, so no stretch of rideable ground is bare.
+    if (nTrees < 2 && hCell >= 50 && hCell < 900) nTrees = 2;
 
     // FOREST STRUCTURE (Chapter 5B). Each cell holds a handful of stands.
     // A stand has a dense core and a thinning edge (the scatter radius is
@@ -243,7 +257,7 @@ export class Vegetation {
     }
     return {
       cx, cz, key: cx * CKEY + cz,
-      ox, oz, rng, forest, elev, nTrees, clusters,
+      ox, oz, rng, forest, elev, nTrees, clusters, zoneKind,
       total: nTrees + nGround, i: 0, list: [],
     };
   }
@@ -254,7 +268,7 @@ export class Vegetation {
     const lf = f.landforms;
     const info = this._info;
     const rng = job.rng;
-    const { forest, nTrees, clusters } = job;
+    const { forest, nTrees, clusters, zoneKind } = job;
     const i = job.i++;
     const isTree = i < nTrees;
     // Scatter inside a stand: dense core, thinning edge, glade in the
@@ -270,10 +284,11 @@ export class Vegetation {
     // candidates before the expensive work starts.
     const dmx = x - 4000, dmz = z - 2500;
     const dMeadow2 = dmx * dmx + dmz * dmz;
-    // Rider's Meadow: the groomed core stays clear, sward returns from
-    // 130 m out and trees only past 260 m — an open flowery meadow with
-    // light trees around its rim.
-    const meadowOk = isTree ? dMeadow2 >= 260 * 260 : dMeadow2 >= 130 * 130;
+    // Rider's Meadow: only the groomed practice core (32 m) stays clear.
+    // Sward returns immediately outside it and light trees from 200 m, so
+    // the player spawns in a meadow that is visibly surrounded by
+    // vegetation rather than on an empty plain.
+    const meadowOk = isTree ? dMeadow2 >= 200 * 200 : dMeadow2 >= 32 * 32;
     // Roads keep a clear riding corridor: 11 m for anything with a trunk,
     // 6 m for sward, so the verge is alive but the bed never is.
     const clearNeed = isTree ? 11 : 6;
@@ -282,8 +297,10 @@ export class Vegetation {
         !lf.inWater(x, z) && lf.roadDist(x, z) >= clearNeed) {
       f.sample(x, z, info);
       const h = info.h;
-      const shore = z > 4420 && h < 66;
-      if (h >= 47 && !shore && info.trail <= 0.02) {
+      // The beach itself stays open sand, but its dunes carry sparse
+      // marram-style bunch grass so the coast is not a dead strip.
+      const dune = z > 4420 && h < 66;
+      if (h >= 47 && info.trail <= 0.02 && (!dune || rng() < 0.34)) {
         const e = 5;
         // One-sided differences: the slope test costs two samples instead
         // of four (the centre height is already in `info`).
@@ -308,6 +325,11 @@ export class Vegetation {
               // ROLLING HILLS: mixed broadleaf woods.
               t = r < 0.4 ? 'birch' : r < 0.7 ? 'oak' : rr < 0.5 ? 'pine' : 'bush';
             }
+            // An ecosystem zone stamps its own character on the stand.
+            if (zoneKind === 'pine') t = r < 0.62 ? 'pine' : r < 0.9 ? 'fir' : 'dead';
+            else if (zoneKind === 'birch') t = r < 0.68 ? 'birch' : r < 0.86 ? 'oak' : 'bush';
+            else if (zoneKind === 'thicket') t = r < 0.45 ? 'bush' : r < 0.7 ? 'shrub' : r < 0.9 ? 'oak' : 'dryBush';
+            else if (zoneKind === 'flower' && r > 0.55) t = r < 0.8 ? 'birch' : 'bush';
             if (info.moist < 0.25 && rr < 0.32) t = 'dead';
             // Random scale 0.85-1.25 (brief), random yaw below.
             s = 0.85 + rng() * 0.4;
@@ -328,6 +350,10 @@ export class Vegetation {
             s = 0.7 + rng() * 0.4;
           } else if (sl > 0.4) {
             ok = false;
+          } else if (dune) {
+            // Dune grass and dry brush on the sand.
+            if (isTree) ok = false;
+            else { t = r < 0.62 ? 'tussock' : r < 0.86 ? 'dryBush' : 'grass'; s = 0.7 + rng() * 0.4; }
           } else if (lakeNear(lf, x, z)) {
             // LAKESHORE: grass and reeds at the water, the odd birch.
             t = r < 0.5 ? 'reed' : r < 0.78 ? 'sedge' : r < 0.9 ? 'grass' : 'birch';
@@ -356,13 +382,19 @@ export class Vegetation {
             // (sedge in damp ground, tussock in dry, clover in between)
             // and its own flower colour.
             const third = info.moist > 0.55 ? 'sedge' : c.seed < 0.5 ? 'clover' : 'tussock';
-            if (r < 0.32) t = 'grass';
+            // A flower-field ecosystem is mostly blossom.
+            if (zoneKind === 'flower' && r > 0.28) {
+              t = c.seed < 0.4 ? 'flowerY' : c.seed < 0.75 ? 'flowerP' : 'flowerW';
+            } else if (r < 0.32) t = 'grass';
             else if (r < 0.56) t = 'grassTall';
             else if (r < 0.72) t = third;
             else if (r < 0.94) {
               t = c.seed < 0.4 ? 'flowerY' : c.seed < 0.75 ? 'flowerP' : 'flowerW';
             } else t = 'shrub';
-            s = 0.75 + rng() * 0.5;
+            // Sward stays close to life size — coverage comes from the
+            // dense on-demand top-up inside the culling ring, not from
+            // oversized tufts (those read as cardboard from the saddle).
+            s = t === 'shrub' ? 0.8 + rng() * 0.5 : 0.9 + rng() * 0.5;
           }
           if (ok && t) {
             const big = TRUNKED[t] === true;
@@ -380,6 +412,71 @@ export class Vegetation {
       }
     }
     return job.i >= job.total;
+  }
+
+  /**
+   * Dense meadow sward for one cell (hotfix: populate the world).
+   *
+   * The main pass places the structure — trees, bushes, forest floor —
+   * at a density the whole 81-cell window can afford. Grass has to be an
+   * order of magnitude denser than that to read as a meadow at riding
+   * speed, but it is culled to the inner ~190 m ring, so it is generated
+   * separately and only for the cells that can actually show it.
+   */
+  _swardTopUp(cx, cz, list) {
+    list.swardDone = true;
+    const f = this.field;
+    const lf = f.landforms;
+    const info = this._info;
+    const ox = cx * CELL, oz = cz * CELL;
+    const rng = mulberry32(hashInt(cx, cz, 0x5ea7));
+    const zh = zoneAt(this.zones, ox + CELL * 0.5, oz + CELL * 0.5);
+    const flowerZone = zh && zh.zone.kind === 'flower';
+    // Patches, not a wash: a handful of drifts per cell, each with its
+    // own dominant species and flower colour.
+    const nd = 3 + (rng() * 3 | 0);
+    const drifts = [];
+    for (let i = 0; i < nd; i++) {
+      drifts.push({
+        x: ox + 8 + rng() * (CELL - 16), z: oz + 8 + rng() * (CELL - 16),
+        r: 16 + rng() * 30, seed: rng(),
+      });
+    }
+    const n = 60 + (rng() * 30 | 0);
+    for (let i = 0; i < n; i++) {
+      const d = drifts[(rng() * drifts.length) | 0];
+      const ang = rng() * 6.283, rad = d.r * Math.pow(rng(), 0.55);
+      const x = d.x + Math.cos(ang) * rad, z = d.z + Math.sin(ang) * rad;
+      const dmx = x - 4000, dmz = z - 2500;
+      if (dmx * dmx + dmz * dmz < 32 * 32) continue;
+      if (x < 30 || x > 7970 || z < 30 || z > 4970) continue;
+      if (lf.inWater(x, z) || lf.roadDist(x, z) < 6) continue;
+      f.sample(x, z, info);
+      const h = info.h;
+      if (h < 47 || info.trail > 0.02) continue;
+      if (z > 4420 && h < 66 && rng() > 0.3) continue;   // open sand
+      const e = 5;
+      const sl = Math.hypot(f.height(x + e, z) - h, f.height(x, z + e) - h) / e;
+      if (sl > 0.5) continue;
+      const r = rng();
+      let t;
+      if (h > 900) t = r < 0.7 ? 'alpineGrass' : 'tussock';
+      else if (h > 150) t = r < 0.45 ? 'tussock' : r < 0.8 ? 'grass' : 'alpineGrass';
+      else if (flowerZone && r > 0.35) {
+        t = d.seed < 0.4 ? 'flowerY' : d.seed < 0.75 ? 'flowerP' : 'flowerW';
+      } else if (info.moist < 0.34) {
+        t = r < 0.55 ? 'tussock' : r < 0.85 ? 'grass' : 'dryBush';
+      } else {
+        t = r < 0.34 ? 'grass' : r < 0.6 ? 'grassTall'
+          : r < 0.72 ? (info.moist > 0.55 ? 'sedge' : 'clover')
+            : r < 0.9 ? (d.seed < 0.4 ? 'flowerY' : d.seed < 0.75 ? 'flowerP' : 'flowerW')
+              : 'clover';
+      }
+      const s = t === 'dryBush' ? 0.8 + rng() * 0.4 : 0.85 + rng() * 0.55;
+      const y = Math.min(h, f.height(x + 0.5, z), f.height(x, z + 0.5)) - 0.06 * s;
+      list.push({ t, x, z, y, yaw: rng() * 6.283, s,
+        tint: hash01(x | 0, z | 0, 0x51ce), tree: false });
+    }
   }
 
   /** Store a finished cell job in the LRU cache and return its list. */
@@ -425,6 +522,7 @@ export class Vegetation {
     const t0 = budgetMs === Infinity ? 0 : nowMs();
     if (budgetMs === Infinity) this._job = null; // drop any partial job
     let pending = false;
+    let swardDone = false; // at most one dense sward cell per frame
     if (!this._growing) this._growing = [];
     const nearCounts = {}, farCounts = {};
     for (const t of TYPES) nearCounts[t] = 0;
@@ -451,6 +549,18 @@ export class Vegetation {
           if (!plants) { pending = true; continue; }
         }
         if (nearRing) nowCells.add(cellKey);
+        // HOTFIX: cells inside the ground ring get a DENSE sward top-up.
+        // Meadow grass is only ever drawn within ~190 m, so generating it
+        // for the whole 81-cell window would be wasted work — it is built
+        // on demand, one cell per frame, and cached with the cell.
+        if (groundRing && !plants.swardDone) {
+          if (budgetMs === Infinity || !swardDone) {
+            swardDone = true;
+            this._swardTopUp(cx + dx, cz + dz, plants);
+          } else {
+            pending = true;
+          }
+        }
         const nPlants = nearRing ? plants.length : (plants.treeN || 0);
         for (let pi = 0; pi < nPlants; pi++) {
           const p = plants[pi];
@@ -559,6 +669,40 @@ function trunk(r0, r1, h, cr, cg, cb) {
   return colored(g, cr, cg, cb, 0.04);
 }
 
+/**
+ * A grass BLADE: one tapered triangle, leaning and curving a little.
+ * Chapter 5B used crossed rectangles for sward, which read as cardboard
+ * cards from a riding camera; a cluster of tapered blades reads as grass
+ * and costs FEWER triangles (one per blade instead of two).
+ */
+function blade(w, h, lean, twist) {
+  const g = new THREE.BufferGeometry();
+  const c = Math.cos(twist), sn = Math.sin(twist);
+  const rx = (x, z) => x * c - z * sn, rz = (x, z) => x * sn + z * c;
+  const tipX = Math.sin(lean) * h * 0.45, tipY = Math.cos(lean) * h;
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+    rx(-w * 0.5, 0), 0, rz(-w * 0.5, 0),
+    rx(w * 0.5, 0), 0, rz(w * 0.5, 0),
+    rx(tipX, 0), tipY, rz(tipX, 0),
+  ]), 3));
+  g.computeVertexNormals();
+  return g;
+}
+
+/** A tuft: `n` blades fanned around the origin. */
+function bladeTuft(n, w, h, spread, r, gr, b, jitter = 0.08) {
+  const parts = [];
+  for (let i = 0; i < n; i++) {
+    const t = i / n;
+    const lean = 0.12 + spread * hash01(i, 3, 41);
+    const hh = h * (0.7 + 0.5 * hash01(i, 7, 43));
+    const bl = blade(w, hh, lean, t * Math.PI * 2 + hash01(i, 11, 47));
+    bl.translate((hash01(i, 13, 53) - 0.5) * w * 1.6, 0, (hash01(i, 17, 59) - 0.5) * w * 1.6);
+    parts.push(colored(bl, r, gr, b, jitter));
+  }
+  return mergeGeometries(parts);
+}
+
 const GEO_BUILDERS = {
   /** Pine: tall trunk + 3 stacked cones. */
   pine() {
@@ -636,16 +780,8 @@ const GEO_BUILDERS = {
     return mergeGeometries(parts);
   },
   /** Grass patch: 4 crossed quads (a tuft, never blades). */
-  grass() {
-    const parts = [];
-    for (let i = 0; i < 4; i++) {
-      const p = new THREE.PlaneGeometry(0.9, 0.5);
-      p.rotateY((i / 4) * Math.PI);
-      p.translate(0, 0.24, 0);
-      parts.push(colored(p, 0.42, 0.58, 0.26, 0.08));
-    }
-    return mergeGeometries(parts);
-  },
+  /** Meadow grass: a fan of 7 soft blades. */
+  grass() { return bladeTuft(7, 0.09, 0.62, 0.55, 0.42, 0.58, 0.26); },
   /** Small shrub: single squashed icosahedron, drier tint. */
   shrub() {
     const a = new THREE.IcosahedronGeometry(0.6, 0);
@@ -665,63 +801,20 @@ const GEO_BUILDERS = {
     return mergeGeometries(parts);
   },
   /** Tall grass: 5 taller crossed blades, lighter and airier. */
-  grassTall() {
-    const parts = [];
-    for (let i = 0; i < 5; i++) {
-      const p = new THREE.PlaneGeometry(0.55, 1.05);
-      p.rotateZ((i - 2) * 0.12);
-      p.rotateY((i / 5) * Math.PI);
-      p.translate(0, 0.52, 0);
-      parts.push(colored(p, 0.47, 0.6, 0.27, 0.07));
-    }
-    return mergeGeometries(parts);
-  },
+  /** Tall grass: 8 longer, lighter blades. */
+  grassTall() { return bladeTuft(8, 0.085, 1.05, 0.45, 0.47, 0.6, 0.27); },
   /** Sedge: stiff dark clump for damp ground. */
-  sedge() {
-    const parts = [];
-    for (let i = 0; i < 4; i++) {
-      const p = new THREE.PlaneGeometry(0.4, 0.8);
-      p.rotateZ((i - 1.5) * 0.22);
-      p.rotateY((i / 4) * Math.PI);
-      p.translate(0, 0.4, 0);
-      parts.push(colored(p, 0.28, 0.48, 0.24, 0.06));
-    }
-    return mergeGeometries(parts);
-  },
+  /** Sedge: stiff, dark, near-vertical blades for damp ground. */
+  sedge() { return bladeTuft(7, 0.07, 0.8, 0.22, 0.28, 0.48, 0.24); },
   /** Tussock: dry straw-coloured bunch grass of the open basins. */
-  tussock() {
-    const parts = [];
-    for (let i = 0; i < 4; i++) {
-      const p = new THREE.PlaneGeometry(0.85, 0.42);
-      p.rotateY((i / 4) * Math.PI);
-      p.translate(0, 0.2, 0);
-      parts.push(colored(p, 0.63, 0.58, 0.3, 0.08));
-    }
-    return mergeGeometries(parts);
-  },
+  /** Tussock: a dense straw-coloured bunch of short blades. */
+  tussock() { return bladeTuft(10, 0.07, 0.44, 0.85, 0.63, 0.58, 0.3); },
   /** Reed: lakeshore stand, tall and narrow. */
-  reed() {
-    const parts = [];
-    for (let i = 0; i < 5; i++) {
-      const p = new THREE.PlaneGeometry(0.26, 1.35);
-      p.rotateZ((i - 2) * 0.09);
-      p.rotateY((i / 5) * Math.PI * 1.2);
-      p.translate((i - 2) * 0.09, 0.68, 0);
-      parts.push(colored(p, 0.4, 0.53, 0.26, 0.05));
-    }
-    return mergeGeometries(parts);
-  },
+  /** Reed: tall narrow lakeshore stand. */
+  reed() { return bladeTuft(6, 0.06, 1.4, 0.16, 0.4, 0.53, 0.26); },
   /** Alpine grass: short, blue-green, hugging the ground up high. */
-  alpineGrass() {
-    const parts = [];
-    for (let i = 0; i < 3; i++) {
-      const p = new THREE.PlaneGeometry(0.7, 0.3);
-      p.rotateY((i / 3) * Math.PI);
-      p.translate(0, 0.15, 0);
-      parts.push(colored(p, 0.36, 0.5, 0.33, 0.06));
-    }
-    return mergeGeometries(parts);
-  },
+  /** Alpine grass: short blue-green mat hugging the ground. */
+  alpineGrass() { return bladeTuft(6, 0.075, 0.3, 0.7, 0.36, 0.5, 0.33); },
   /** Dry bush: sparse straw-coloured twigs of the dry country. */
   dryBush() {
     const parts = [];
@@ -820,6 +913,66 @@ function flowerOf(cr, cg, cb) {
 // Families that carry per-instance colour variation.
 const TINTED = {};
 for (const t of [...GRASSES, ...FLOWERS, ...BUSHES, 'clover', 'fern', 'mossRock']) TINTED[t] = true;
+
+/**
+ * ECOSYSTEM ZONES (hotfix: populate the world).
+ *
+ * The noise-driven forest field left 18% of the rideable map more than
+ * 150 m from the nearest tree and 5% more than 300 m — big empty plains.
+ * This lays 20-30 named ecosystems across the 40 km2 map on a jittered
+ * coarse grid (so they are spread, never clumped or aligned), each
+ * 150-400 m across, and every one multiplies the local plant budget and
+ * biases its species mix. Deterministic: same world every launch.
+ */
+function buildZones(field) {
+  const lf = field.landforms;
+  const zones = [];
+  const COLS = 8, ROWS = 4;                 // 32 slots -> 24-30 zones
+  const cw = 8000 / COLS, ch = 5000 / ROWS; // the fixed 40 km2 world
+  for (let i = 0; i < COLS; i++) {
+    for (let j = 0; j < ROWS; j++) {
+      // Two jitter attempts per slot so a slot rejected on water or rock
+      // still gets a chance to place its ecosystem somewhere nearby.
+      for (let att = 0; att < 3; att++) {
+        const jx = hash01(i, j, 0x2a11 + att * 7), jz = hash01(i, j, 0x2a12 + att * 7);
+        const x = (i + 0.12 + jx * 0.76) * cw;
+        const z = (j + 0.12 + jz * 0.76) * ch;
+        const h = field.height(x, z);
+        if (h < 52 || h > 620) break;                    // sea floor / high rock
+        if (lf.inWater(x, z)) continue;
+        if (Math.hypot(x - 4000, z - 2500) < 430) continue; // spawn meadow stays open
+        const e = 9;
+        const sl = Math.hypot(field.height(x + e, z) - field.height(x - e, z),
+          field.height(x, z + e) - field.height(x, z - e)) / (2 * e);
+        if (sl > 0.5) continue;
+        const info = { h: 0, trail: 0, moist: 0, mtn: 0, roadType: 0 };
+        field.sample(x, z, info);
+        const r = 75 + hash01(i, j, 0x2a13) * 125;       // 150-400 m WIDE
+        const kind = h > 200 ? 'pine'
+          : h > 110 ? 'mixed'
+            : info.moist > 0.52 ? 'flower'
+              : hash01(i, j, 0x2a15) < 0.5 ? 'birch' : 'thicket';
+        zones.push({ x, z, r, kind, strength: 0.85 + hash01(i, j, 0x2a14) * 0.6 });
+        break;
+      }
+    }
+  }
+  return zones;
+}
+
+/** Strongest ecosystem zone over a point, or null. */
+function zoneAt(zones, x, z) {
+  let best = null, bestW = 0;
+  for (let i = 0; i < zones.length; i++) {
+    const zo = zones[i];
+    const d = Math.hypot(x - zo.x, z - zo.z);
+    if (d >= zo.r) continue;
+    // Dense core, thinning to the rim.
+    const w = (1 - sstep(zo.r * 0.45, zo.r, d)) * zo.strength;
+    if (w > bestW) { bestW = w; best = zo; }
+  }
+  return best ? { zone: best, w: bestW } : null;
+}
 
 // Types seated on their whole footprint (anything with a trunk or a
 // boulder body); everything else is small enough for two probes.
