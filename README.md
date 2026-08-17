@@ -164,6 +164,19 @@ walks only each cell's tree prefix. Colour variation is per-INSTANCE
 shades without a second material or draw call. Measured streaming cost
 over a 90 s ride: 855 ms total, p95 0.2 ms, p99 3.1 ms per frame.
 
+**Hotfix 5B.3 — spawn relocation.** The spawn stood *on* the 4-way
+junction, so however well the meadow was populated the first frame was a
+wide dirt road filling the bottom third. The spawn moved 44 m into the
+meadow grass at (4026, 2464): the South Arm is 26 m to the west (a dirt
+road in view, not underfoot), the ground is flat (0.3 deg), the cabin and
+lake lie beyond it, and forest patches ring the horizon. Validated the
+way the brief asked — by eye, in eight compass screenshots rather than
+by counting instances: N, NE, E, SE, S, SW, W and NW all show trees,
+with wildflower drifts, grass, bushes, rock clusters and a fallen log in
+the near field. Nothing with a trunk is planted within 13 m of the spawn
+point, so the player never starts inside a tree. No terrain, road or
+vegetation-generation change.
+
 **Hotfix 5B.2 — vegetation render fix.** The world measured full but
 looked empty, so the vegetation system was instrumented rather than
 re-tuned. `world.vegetation.debugReport()` now returns exactly what the

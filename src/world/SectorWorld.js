@@ -61,10 +61,17 @@ export class SectorWorld {
     // for future gameplay streaming.
     this._grid = new ChunkGrid(SECTOR_SIZE, STREAM_RADIUS);
 
-    // Rider's Meadow spawn: on the North-South road just above the 4-way
-    // intersection at the exact world center, facing the crossroads.
-    const sx = 4000, sz = 2465;
-    this._spawn = { x: sx, y: this.field.height(sx, sz), z: sz, yaw: 0 }; // facing the crossroads + practice jump
+    // Rider's Meadow spawn. HOTFIX 5B.3: the spawn used to sit ON the
+    // 4-way junction, so the first thing the player saw was a wide dirt
+    // road filling the bottom of the frame. It now stands in the meadow
+    // grass 44 m off the junction — the South Arm is 26 m to the west
+    // (a dirt road in view, not underfoot), the abandoned cabin and the
+    // lake lie ahead to the south-west, and the meadow's forest patches
+    // ring the horizon in every direction. Still inside Rider's Meadow,
+    // still flat (0.3 deg), still the world centre for every system that
+    // asks for it.
+    const sx = 4026, sz = 2464;
+    this._spawn = { x: sx, y: this.field.height(sx, sz), z: sz, yaw: -1.57 }; // facing the dirt road 26 m west (slightly downhill, cabin beyond)
 
     // Lakes: one static water disc each (1 draw call apiece).
     // Chapter 4R render fix: transparent water must not write depth —

@@ -30,6 +30,10 @@ import { hash01, mulberry32, hashInt, sstep, vnoise } from './noise.js';
 
 const CELL = 125;
 const NEAR_R = 2;   // 5x5 cells full detail  (~312 m)
+// The spawn point (see SectorWorld). Nothing with a trunk is planted in
+// its immediate bubble, so the player never starts inside a tree.
+const SPAWN_X = 4026, SPAWN_Z = 2464;
+const SPAWN_CLEAR = 13;
 const GROUND_R = 1; // 3x3 cells for grass/flowers (~190 m) — Chapter 5B
                     // distance culling: sward is invisible clutter at
                     // 300 m but costs instances, matrix writes and fill.
@@ -294,7 +298,7 @@ export class Vegetation {
     // never be an empty field: the meadow bowl gets a guaranteed budget of
     // groves and ground detail, thinning back to the normal world by
     // ~500 m out. The road corridors keep the riding lines clear.
-    const dsx = ox + CELL * 0.5 - 4000, dsz = oz + CELL * 0.5 - 2465;
+    const dsx = ox + CELL * 0.5 - SPAWN_X, dsz = oz + CELL * 0.5 - SPAWN_Z;
     const dSpawn = Math.hypot(dsx, dsz);
     if (dSpawn < 520) {
       const k = 1 - sstep(180, 520, dSpawn);
@@ -358,7 +362,9 @@ export class Vegetation {
     // Roads keep a clear riding corridor: 11 m for anything with a trunk,
     // 6 m for sward, so the verge is alive but the bed never is.
     const clearNeed = isTree ? 11 : 6;
-    if (meadowOk && x >= 30 && x <= 7970 && z >= 30 && z <= 4970 &&
+    const spx = x - SPAWN_X, spz = z - SPAWN_Z;
+    const spawnOk = !isTree || spx * spx + spz * spz > SPAWN_CLEAR * SPAWN_CLEAR;
+    if (meadowOk && spawnOk && x >= 30 && x <= 7970 && z >= 30 && z <= 4970 &&
         !nearViewpoint(lf, x, z) && !nearLandmark(lf, x, z) &&
         !lf.inWater(x, z) && lf.roadDist(x, z) >= clearNeed) {
       f.sample(x, z, info);
@@ -510,7 +516,7 @@ export class Vegetation {
     }
     // The spawn valley gets roughly double the close-range detail: this
     // is the first thing the player ever sees.
-    const nearSpawn = Math.hypot(ox + CELL * 0.5 - 4000, oz + CELL * 0.5 - 2465) < 320;
+    const nearSpawn = Math.hypot(ox + CELL * 0.5 - SPAWN_X, oz + CELL * 0.5 - SPAWN_Z) < 320;
     const n = (nearSpawn ? 130 : 60) + (rng() * 30 | 0);
     for (let i = 0; i < n; i++) {
       const d = drifts[(rng() * drifts.length) | 0];
