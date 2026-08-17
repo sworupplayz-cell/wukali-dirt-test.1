@@ -64,9 +64,45 @@ const DETAIL = ['log', 'stump', 'mossRock'];
 const SWARD = {};
 for (const t of [...GRASSES, ...FLOWERS, 'clover']) SWARD[t] = true;
 const TYPES = [...TREES, ...BUSHES, ...GRASSES, ...FLOWERS, ...GROUND, ...DETAIL];
-// Trunk collision radius per type (0 = ride-through ground cover; fallen
-// logs stay ride-over so they never block a line through a forest).
-const COLL = { pine: 0.42, fir: 0.36, birch: 0.34, oak: 0.55, dead: 0.38 };
+/**
+ * Chapter 5D — MATURE FOREST. Tree height in METRES, per species, from
+ * the brief. Every tree geometry is normalised to exactly one unit tall
+ * (see normH), so an instance's uniform scale IS its height: a pine with
+ * s = 15.4 is a 15.4 m pine. Placement draws a height from the species
+ * range, which spans roughly +/-20% about its midpoint.
+ *
+ * The old trees were built at whatever size the primitives happened to
+ * come out — a "pine" topped out at 6.7 m and an "oak" at 4.4 m, i.e.
+ * shoulder-high scenery a rider looks over rather than woodland a rider
+ * looks into. That is what made the forest read as decorative.
+ */
+const TREE_H = {
+  pine: [12, 18],
+  fir: [10, 16],
+  oak: [8, 14],
+  birch: [7, 12],
+  dead: [6, 10],
+};
+/** Draw a mature height for a tree species (metres); 0 if not a tree. */
+function treeHeight(t, r) {
+  const b = TREE_H[t];
+  return b ? b[0] + r * (b[1] - b[0]) : 0;
+}
+/**
+ * How far a plant's base is buried so it never shows daylight under it on
+ * broken ground. Ground cover scales with its size; a TREE does not — a
+ * tree's scale is now its height, and 6% of 15 m would bury the bole.
+ */
+function sink(t, s) {
+  return TREE_H[t] ? 0.12 : 0.06 * s;
+}
+// Trunk collision radius PER METRE OF HEIGHT (0 = ride-through ground
+// cover; fallen logs stay ride-over so they never block a line through a
+// forest). Chapter 5D: trees are scaled by height now, so a flat radius
+// would grow a 6 m trunk on an 18 m pine. Tuned so the absolute radii
+// land where they were before the rebuild — pine ~0.45 m, oak ~0.6 m —
+// and the bike's feel through timber is unchanged.
+const COLL = { pine: 0.030, fir: 0.026, birch: 0.028, oak: 0.055, dead: 0.038 };
 for (const t of [...BUSHES, ...GRASSES, ...FLOWERS, ...GROUND, ...DETAIL]) COLL[t] = 0;
 // HOTFIX (vegetation integration) — oak and birch were the two species
 // the spawn valley is made of and the two whose buffers ran out: 349 oaks
@@ -152,7 +188,11 @@ export class Vegetation {
       }
       m.count = 0;
       m.frustumCulled = false;
-      m.castShadow = true; // only renders into the map when shadows are on
+      // Chapter 5D: only things with real volume cast into the shadow
+      // map. A grass tuft's shadow is sub-pixel from the saddle, so sward
+      // and ferns are dropped from the shadow caster set; trees, bushes,
+      // logs and stones still cast.
+      m.castShadow = !SWARD[t] && t !== 'fern';
       scene.add(m);
       this._near[t] = m;
     }
@@ -359,12 +399,18 @@ export class Vegetation {
     // never be an empty field: the meadow bowl gets a guaranteed budget of
     // groves and ground detail, thinning back to the normal world by
     // ~500 m out. The road corridors keep the riding lines clear.
+    //
+    // Chapter 5D: that budget was written for 4-metre trees. With mature
+    // ones it put 239 trunks inside 250 m of the spawn — over the brief's
+    // 120-180 band and, worse, it closed in the meadow the brief wants
+    // left OPEN. The forced floor drops and the guarantee now leans on
+    // the ring of patches around the bowl instead of on raw count.
     const dsx = ox + CELL * 0.5 - SPAWN_X, dsz = oz + CELL * 0.5 - SPAWN_Z;
     const dSpawn = Math.hypot(dsx, dsz);
     if (dSpawn < 520) {
       const k = 1 - sstep(140, 520, dSpawn);
-      nTrees = Math.max(nTrees, Math.round(26 + 26 * k));
-      nGround = Math.max(nGround, Math.round(14 + 10 * k));
+      nTrees = Math.max(nTrees, Math.round(15 + 16 * k));
+      nGround = Math.max(nGround, Math.round(12 + 8 * k));
     }
 
     // FOREST STRUCTURE (Chapter 5B). Each cell holds a handful of stands.
@@ -421,20 +467,35 @@ export class Vegetation {
     // the player spawns in a meadow that is visibly surrounded by
     // vegetation rather than on an empty plain.
     const meadowOk = isTree ? dMeadow2 >= 30 * 30 : dMeadow2 >= 24 * 24;
-    // Roads keep a clear riding corridor: 11 m for anything with a trunk,
-    // 6 m for sward, so the verge is alive but the bed never is.
-    const clearNeed = isTree ? 9 : 6;   // brief: 6 m clear riding corridor
+    // Roads keep a clear riding corridor. Chapter 5D: the brief asks for
+    // a 6 m corridor and for trees to FRAME the road rather than stand
+    // back from it. Trunks come in to 7 m from the centreline — 3.5 m of
+    // verge beyond the widest bed (a 7 m main) and 4.5 m beyond a pass —
+    // so a mature canopy leans over the road without anything to hit.
+    const clearNeed = isTree ? 7 : 4;   // brief: 6 m clear riding corridor
     const spx = x - SPAWN_X, spz = z - SPAWN_Z;
     const spawnOk = !isTree || spx * spx + spz * spz > SPAWN_CLEAR * SPAWN_CLEAR;
-    if (meadowOk && spawnOk && x >= 30 && x <= 7970 && z >= 30 && z <= 4970 &&
-        !nearViewpoint(lf, x, z) && !nearLandmark(lf, x, z) &&
-        !lf.inWater(x, z) && lf.roadDist(x, z) >= clearNeed) {
+    const rd = (meadowOk && spawnOk && x >= 30 && x <= 7970 && z >= 30 && z <= 4970 &&
+      !nearViewpoint(lf, x, z) && !nearLandmark(lf, x, z) && !lf.inWater(x, z))
+      ? lf.roadDist(x, z) : -1;
+    if (rd >= clearNeed) {
       f.sample(x, z, info);
       const h = info.h;
       // The beach itself stays open sand, but its dunes carry sparse
       // marram-style bunch grass so the coast is not a dead strip.
       const dune = z > 4420 && h < 66;
-      if (h >= 47 && info.trail <= 0.02 && (!dune || rng() < 0.34)) {
+      // Chapter 5D — ROAD FRAMING. `info.trail` merges TWO things: the
+      // graded apron of a built road (which fades out as far as 190 m)
+      // and the hidden 2.5 m shortcut trails. Rejecting every candidate
+      // with any apron influence is what kept the woods 40 m back from
+      // every carriageway and made each route feel like it crossed open
+      // country. Near a REGISTERED road a tree may now stand anywhere the
+      // exact 7 m corridor test above allows, because that test is the
+      // real safety guarantee. Away from one, the tight gate stays, so
+      // the hidden shortcuts are never grown over. Ground cover keeps the
+      // tight gate everywhere so the bed edge stays crisp.
+      const trailMax = isTree && rd < 70 ? 1 : 0.02;
+      if (h >= 47 && info.trail <= trailMax && (!dune || rng() < 0.34)) {
         const e = 5;
         // One-sided differences: the slope test costs two samples instead
         // of four (the centre height is already in `info`).
@@ -522,12 +583,18 @@ export class Vegetation {
             s = t === 'shrub' ? 0.8 + rng() * 0.5 : 0.9 + rng() * 0.5;
           }
           if (ok && t) {
+            // Chapter 5D: a TREE's scale is its height in metres (the
+            // geometry is one unit tall). Applied last, over whatever the
+            // ecosystem branch above happened to set, so every path that
+            // can produce a tree — mountain belt, spawn valley, rolling
+            // hills, lakeshore birch, patch character — gets a mature one.
+            if (TREE_H[t]) s = treeHeight(t, rng());
             const big = TRUNKED[t] === true;
             const rF = big ? 0.9 : 0.5;
             const y = (big
               ? Math.min(h, f.height(x + rF, z), f.height(x - rF, z),
                 f.height(x, z + rF), f.height(x, z - rF))
-              : Math.min(h, f.height(x + rF, z), f.height(x, z + rF))) - 0.06 * s;
+              : Math.min(h, f.height(x + rF, z), f.height(x, z + rF))) - sink(t, s);
             // Per-instance tint (0..1) drives the shared-material colour
             // variation for sward and stone — see _write().
             const tint = hash01(x | 0, z | 0, 0x51ce);
@@ -645,13 +712,18 @@ export class Vegetation {
     // from the saddle in every direction, and an outer one that fills the
     // 60-140 m band. A lane is kept open along the spawn heading so the
     // first ride out of the meadow is never into a trunk.
-    const INNER = 38, SLOTS = 76 + INNER;
+    //
+    // Chapter 5D: mature trees carry far more silhouette per trunk, so
+    // the grove is thinner and set further back — the meadow stays the
+    // open bowl the brief asks for and the trees ring it rather than
+    // crowd it.
+    const INNER = 20, SLOTS = 62 + INNER;
     for (let k = 0; k < SLOTS; k++) {
       const inner = k < INNER;
       const a = k * 2.39996;                                  // golden angle
       const rad = inner
-        ? 21 + 56 * Math.pow((k + 0.5) / INNER, 0.62)         // 21-77 m
-        : 60 + 80 * Math.sqrt((k - INNER + 0.5) / (SLOTS - INNER)); // 60-140 m
+        ? 34 + 52 * Math.pow((k + 0.5) / INNER, 0.62)         // 34-86 m
+        : 72 + 82 * Math.sqrt((k - INNER + 0.5) / (SLOTS - INNER)); // 72-154 m
       const x = SPAWN_X + Math.cos(a) * rad + (hash01(k, 1, 0x9e1) - 0.5) * 17;
       const z = SPAWN_Z + Math.sin(a) * rad + (hash01(k, 2, 0x9e2) - 0.5) * 17;
       if (x < ox || x >= ox + CELL || z < oz || z >= oz + CELL) continue;
@@ -671,12 +743,14 @@ export class Vegetation {
       // odd pine for silhouette variety.
       const r = hash01(k, 3, 0x9e3);
       const t = r < 0.44 ? 'oak' : r < 0.86 ? 'birch' : 'pine';
-      // Trees in the near band are the ones that must read from the
-      // saddle, so they take the upper half of the scale range.
-      const sc = (inner ? 1.05 : 0.9) + hash01(k, 4, 0x9e4) * 0.3;
+      // Chapter 5D: mature heights in metres. Trees in the near band are
+      // the ones that must read from the saddle, so they take the upper
+      // half of the species range.
+      const hv = hash01(k, 4, 0x9e4);
+      const sc = treeHeight(t, inner ? 0.5 + hv * 0.5 : 0.15 + hv * 0.7);
       const rF = 0.9;
       const y = Math.min(info.h, f.height(x + rF, z), f.height(x - rF, z),
-        f.height(x, z + rF), f.height(x, z - rF)) - 0.06 * sc;
+        f.height(x, z + rF), f.height(x, z - rF)) - sink(t, sc);
       list.push({ t, x, z, y, yaw: hash01(k, 5, 0x9e5) * 6.283, s: sc,
         tint: hash01(x | 0, z | 0, 0x51ce), tree: true });
     }
@@ -810,12 +884,17 @@ export class Vegetation {
     let vn = 0, vf = 0;
     for (const t of TYPES) {
       this._near[t].count = nearCounts[t];
+      // Chapter 5D: skip empty species outright. Measured this is draw-call
+      // neutral (three.js already early-outs on an instanceCount of 0), but
+      // it keeps them out of the render list and the shadow caster walk.
+      this._near[t].visible = nearCounts[t] > 0;
       this._near[t].instanceMatrix.needsUpdate = true;
       if (this._near[t].instanceColor) this._near[t].instanceColor.needsUpdate = true;
       vn += nearCounts[t];
     }
     for (const t of Object.keys(CAP_FAR)) {
       this._far[t].count = farCounts[t];
+      this._far[t].visible = farCounts[t] > 0;
       this._far[t].instanceMatrix.needsUpdate = true;
       vf += farCounts[t];
     }
@@ -873,8 +952,8 @@ export class Vegetation {
       const rad = 12 + (F.radius - 12) * ((k + 0.5) / F.n);
       const x = px + Math.cos(a) * rad;
       const z = pz + Math.sin(a) * rad;
-      const s = 1.05 + hash01(k, 7, 0x50f) * 0.45;
-      const y = f.height(x, z) - 0.06 * s;
+      const s = treeHeight('pine', hash01(k, 7, 0x50f));
+      const y = f.height(x, z) - sink('pine', s);
       this._write(mesh, slot, {
         x, y, z, yaw: hash01(k, 8, 0x50e) * 6.283, s,
         tint: hash01(x | 0, z | 0, 0x51ce),
@@ -883,6 +962,7 @@ export class Vegetation {
     }
     this.visibleNear += slot - mesh.count;
     mesh.count = slot;
+    mesh.visible = slot > 0;
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     // The forced stand is a fixed ring around the rider, so it is rebuilt
@@ -953,6 +1033,28 @@ function trunk(r0, r1, h, cr, cg, cb) {
 }
 
 /**
+ * Chapter 5D: normalise a tree to exactly ONE UNIT TALL, sitting on y=0.
+ * The builders below are written in comfortable real-world metres and
+ * this rescales them, so the instance scale carries the height and the
+ * species proportions are decided in one place (TREE_H).
+ */
+function normH(geo) {
+  geo.computeBoundingBox();
+  const b = geo.boundingBox;
+  geo.translate(0, -b.min.y, 0);
+  const h = b.max.y - b.min.y;
+  if (h > 0) geo.scale(1 / h, 1 / h, 1 / h);
+  return geo;
+}
+
+/** A conifer tier: an open cone (no base cap — it is never seen). */
+function tier(r, h, y, cr, cg, cb, seg = 6) {
+  const c = new THREE.ConeGeometry(r, h, seg, 1, true);
+  c.translate(0, y + h / 2, 0);
+  return colored(c, cr, cg, cb, 0.05);
+}
+
+/**
  * A grass BLADE: one tapered triangle, leaning and curving a little.
  * Chapter 5B used crossed rectangles for sward, which read as cardboard
  * cards from a riding camera; a cluster of tapered blades reads as grass
@@ -987,58 +1089,87 @@ function bladeTuft(n, w, h, spread, r, gr, b, jitter = 0.08) {
 }
 
 const GEO_BUILDERS = {
-  /** Pine: tall trunk + 3 stacked cones. */
+  /**
+   * Chapter 5D — MATURE PINE (12-18 m). A clear bole for the lower third
+   * (you ride *under* the canopy and see trunks receding into the wood),
+   * then five cone tiers that narrow and shorten toward a definite spire.
+   * Drawn in metres for a nominal ~15 m tree, then normalised.
+   */
   pine() {
-    const parts = [trunk(0.22, 0.15, 2.2, 0.36, 0.26, 0.17)];
-    for (let i = 0; i < 3; i++) {
-      const c = new THREE.ConeGeometry(1.6 - i * 0.42, 2.2, 6);
-      c.translate(0, 2.6 + i * 1.5, 0);
-      parts.push(colored(c, 0.16, 0.36 + i * 0.03, 0.19, 0.06));
+    const parts = [trunk(0.34, 0.20, 6.4, 0.34, 0.25, 0.17)];
+    const R = [3.05, 2.70, 2.25, 1.70, 1.05];
+    for (let i = 0; i < R.length; i++) {
+      parts.push(tier(R[i], 3.3 - i * 0.22, 4.6 + i * 1.95,
+        0.15, 0.34 + i * 0.022, 0.19));
     }
-    return mergeGeometries(parts);
+    return normH(mergeGeometries(parts));
   },
-  /** Fir: slimmer, bluer, 4 tight cones. */
+  /**
+   * MATURE FIR (10-16 m). Narrower and bluer than the pine, with tighter
+   * tiers running further down the trunk — the dense, dark tree that
+   * fills the mountain belt.
+   */
   fir() {
-    const parts = [trunk(0.18, 0.12, 1.6, 0.33, 0.24, 0.16)];
-    for (let i = 0; i < 4; i++) {
-      const c = new THREE.ConeGeometry(1.15 - i * 0.24, 1.7, 6);
-      c.translate(0, 1.9 + i * 1.15, 0);
-      parts.push(colored(c, 0.13, 0.3 + i * 0.02, 0.24, 0.05));
+    const parts = [trunk(0.28, 0.16, 4.2, 0.31, 0.23, 0.16)];
+    for (let i = 0; i < 6; i++) {
+      parts.push(tier(2.25 - i * 0.31, 2.6 - i * 0.12, 2.9 + i * 1.55,
+        0.12, 0.29 + i * 0.018, 0.24));
     }
-    return mergeGeometries(parts);
+    return normH(mergeGeometries(parts));
   },
-  /** Birch: pale trunk + two bright ellipsoid canopies. */
-  birch() {
-    const parts = [trunk(0.16, 0.11, 2.6, 0.85, 0.84, 0.78)];
-    const c1 = new THREE.IcosahedronGeometry(1.25, 0);
-    c1.scale(1, 1.25, 1);
-    c1.translate(0, 3.3, 0);
-    parts.push(colored(c1, 0.45, 0.62, 0.25, 0.08));
-    const c2 = new THREE.IcosahedronGeometry(0.8, 0);
-    c2.translate(0.7, 2.6, 0.3);
-    parts.push(colored(c2, 0.5, 0.66, 0.28, 0.08));
-    return mergeGeometries(parts);
-  },
-  /** Small oak: thick trunk + broad round canopy. */
+  /**
+   * MATURE OAK (8-14 m). A heavy bole that forks into two limbs carrying
+   * a broad, lumpy crown wider than the tree is tall — the broadleaf
+   * silhouette that gives the lowland woods their shape.
+   */
   oak() {
-    const parts = [trunk(0.3, 0.22, 1.7, 0.34, 0.25, 0.16)];
-    const c = new THREE.IcosahedronGeometry(1.7, 0);
-    c.scale(1.2, 0.95, 1.2);
-    c.translate(0, 2.8, 0);
-    parts.push(colored(c, 0.3, 0.45, 0.17, 0.09));
-    return mergeGeometries(parts);
-  },
-  /** Dead tree: bare trunk + 3 branch spikes. */
-  dead() {
-    const parts = [trunk(0.2, 0.08, 3.2, 0.42, 0.36, 0.3)];
-    for (let i = 0; i < 3; i++) {
-      const b = new THREE.CylinderGeometry(0.03, 0.07, 1.3, 4);
-      b.rotateZ(0.7 + i * 0.5);
-      b.rotateY(i * 2.1);
-      b.translate(0, 1.7 + i * 0.6, 0);
-      parts.push(colored(b, 0.4, 0.34, 0.28, 0.04));
+    const parts = [trunk(0.62, 0.46, 4.0, 0.33, 0.25, 0.16)];
+    for (let i = 0; i < 2; i++) {
+      const l = new THREE.CylinderGeometry(0.18, 0.34, 3.0, 4);
+      l.rotateZ(i ? 0.5 : -0.44);
+      l.rotateY(i * 1.4);
+      l.translate(i ? 0.8 : -0.7, 5.2, i ? -0.4 : 0.35);
+      parts.push(colored(l, 0.33, 0.25, 0.16, 0.04));
     }
-    return mergeGeometries(parts);
+    const lobes = [[0, 7.6, 0, 3.5, 1.0], [-1.9, 6.9, 0.7, 2.5, 0.85],
+      [1.7, 7.0, -0.9, 2.6, 0.85], [0.4, 8.9, 0.5, 2.1, 0.8]];
+    for (let i = 0; i < lobes.length; i++) {
+      const [lx, ly, lz, r, sy] = lobes[i];
+      const c = new THREE.IcosahedronGeometry(r, 0);
+      c.scale(1.15, sy, 1.15);
+      c.translate(lx, ly, lz);
+      parts.push(colored(c, 0.29 + i * 0.012, 0.44, 0.17, 0.09));
+    }
+    return normH(mergeGeometries(parts));
+  },
+  /**
+   * MATURE BIRCH (7-12 m). A slim pale trunk held high with an airy,
+   * light-green crown — the bright tree that breaks up the conifers.
+   */
+  birch() {
+    const parts = [trunk(0.26, 0.15, 5.6, 0.86, 0.85, 0.79)];
+    const lobes = [[0, 7.4, 0, 2.05, 1.3], [-1.15, 6.5, 0.5, 1.35, 1.05],
+      [1.05, 6.9, -0.55, 1.25, 1.05]];
+    for (let i = 0; i < lobes.length; i++) {
+      const [lx, ly, lz, r, sy] = lobes[i];
+      const c = new THREE.IcosahedronGeometry(r, 0);
+      c.scale(1, sy, 1);
+      c.translate(lx, ly, lz);
+      parts.push(colored(c, 0.45 + i * 0.02, 0.62, 0.25, 0.08));
+    }
+    return normH(mergeGeometries(parts));
+  },
+  /** DEAD SNAG (6-10 m): a bare broken trunk and four branch spikes. */
+  dead() {
+    const parts = [trunk(0.34, 0.12, 6.2, 0.43, 0.37, 0.31)];
+    for (let i = 0; i < 4; i++) {
+      const b = new THREE.CylinderGeometry(0.05, 0.13, 2.2 - i * 0.25, 4);
+      b.rotateZ(0.65 + i * 0.34);
+      b.rotateY(i * 1.9);
+      b.translate(0, 3.0 + i * 0.95, 0);
+      parts.push(colored(b, 0.41, 0.35, 0.29, 0.04));
+    }
+    return normH(mergeGeometries(parts));
   },
   /** Bush: two squashed icosahedrons. */
   bush() {
@@ -1238,7 +1369,11 @@ function buildZones(field) {
         (inner ? 120 : 100) + hash01(i, att, 0x41) * 55, 0, 60)) break;
     }
   }
-  // ...and the rest of the map on a jittered 7 x 5 grid (35 slots).
+  // ...and the rest of the map on a jittered 6 x 4 grid (24 slots).
+  // Chapter 5D: the brief asks for 30-40 patches 180-400 m across. The
+  // budget is split three ways — spawn ring, open-country grid, and the
+  // road corridors below — and the jitter is 0.76 of a cell so the
+  // survivors never read as a grid.
   const COLS = 6, ROWS = 4;
   const cw = 8000 / COLS, ch = 5000 / ROWS;
   for (let i = 0; i < COLS; i++) {
@@ -1247,9 +1382,38 @@ function buildZones(field) {
         const jx = hash01(i, j, 0x2a11 + att * 7), jz = hash01(i, j, 0x2a12 + att * 7);
         const x = (i + 0.12 + jx * 0.76) * cw;
         const z = (j + 0.12 + jz * 0.76) * ch;
-        const r = 90 + hash01(i, j, 0x2a13) * 85;     // 180-350 m WIDE
+        const r = 90 + hash01(i, j, 0x2a13) * 110;    // 180-400 m WIDE
         if (push(x, z, r, 0, 430)) break;
       }
+    }
+  }
+
+  // ROADSIDE STANDS (Chapter 5D). "Roads must feel like they travel
+  // THROUGH forests." The grid above is laid out without any knowledge of
+  // where the roads run, so a route could cross the whole map through
+  // open grass. These patches are seeded off the road vertex list itself:
+  // the centre sits 70-150 m to one side, and the radius is large enough
+  // that the patch reaches back over the carriageway. Trees inside still
+  // obey the 7 m corridor test, so the bed stays clear — the road simply
+  // runs through timber instead of past it.
+  const rx = lf._rx, rz = lf._rz;
+  if (rx && rx.length) {
+    const STEP = Math.max(1, (rx.length / 240) | 0);
+    let placed = 0;
+    for (let i = 0; i < rx.length && placed < 12; i += STEP) {
+      const hx = hash01(i, 3, 0x7a01);
+      if (hx > 0.34) continue;                    // only a third of the stops
+      // Perpendicular to the local road direction, one side or the other.
+      const j = Math.min(rx.length - 1, i + 4);
+      let tx = rx[j] - rx[i], tz = rz[j] - rz[i];
+      const tl = Math.hypot(tx, tz) || 1;
+      tx /= tl; tz /= tl;
+      const side = hash01(i, 5, 0x7a02) < 0.5 ? 1 : -1;
+      const off = 70 + hash01(i, 7, 0x7a03) * 80;
+      const r = 100 + hash01(i, 11, 0x7a04) * 95;  // 200-390 m wide
+      // A patch is only useful if its body actually reaches the road.
+      if (r < off + 25) continue;
+      if (push(rx[i] - tz * side * off, rz[i] + tx * side * off, r, 0, 300)) placed++;
     }
   }
   return zones;
@@ -1322,12 +1486,15 @@ function buildImpostor(t) {
     pine: [0.16, 0.35, 0.19], fir: [0.13, 0.3, 0.23],
     birch: [0.45, 0.6, 0.26], oak: [0.3, 0.44, 0.18], dead: [0.42, 0.36, 0.3],
   }[t];
-  const h = t === 'dead' ? 3.4 : t === 'birch' ? 4.4 : t === 'oak' ? 3.6 : 6.2;
-  const w = t === 'oak' ? 2.1 : t === 'birch' ? 1.6 : 1.5;
-  const c = new THREE.ConeGeometry(w * 0.55, h * 0.75, 5);
-  c.translate(0, h * 0.55, 0);
-  const tr = new THREE.CylinderGeometry(0.14, 0.2, h * 0.3, 4);
-  tr.translate(0, h * 0.15, 0);
-  return mergeGeometries([colored(c, tint[0], tint[1], tint[2], 0.05),
-    colored(tr, 0.35, 0.26, 0.17, 0.03)]);
+  // Chapter 5D: impostors are normalised to one unit tall like the full
+  // models, so a distant tree is scaled by the SAME height its near-ring
+  // twin would use and the two rings agree at the LOD boundary. Only the
+  // width-to-height ratio is per species.
+  const w = t === 'oak' ? 0.62 : t === 'birch' ? 0.36 : t === 'dead' ? 0.2 : 0.34;
+  const c = new THREE.ConeGeometry(w, 0.72, 5);
+  c.translate(0, 0.64, 0);
+  const tr = new THREE.CylinderGeometry(0.028, 0.042, 0.34, 4);
+  tr.translate(0, 0.17, 0);
+  return normH(mergeGeometries([colored(c, tint[0], tint[1], tint[2], 0.05),
+    colored(tr, 0.35, 0.26, 0.17, 0.03)]));
 }

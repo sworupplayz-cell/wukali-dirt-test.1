@@ -186,6 +186,59 @@ carry the colour variety, so three wildflower meshes became one, six
 grasses became four and two logs became one. Five fewer InstancedMeshes
 brought draw calls at the spawn from 99 to **96**.
 
+**Chapter 5D — mature forest rebuild.** The trees were too small to be
+woodland. A "pine" topped out at 6.7 m and an "oak" at 4.4 m, so a rider
+looked *over* the forest instead of into it — which is what made it read
+as decoration no matter how many trunks were placed.
+
+**Scale is now a first-class property.** Every tree geometry is
+normalised to exactly one unit tall (`normH`), so an instance's uniform
+scale IS its height in metres, and placement draws that height from a
+species range: pine 12-18 m, fir 10-16 m, oak 8-14 m, birch 7-12 m, dead
+snag 6-10 m. One line at the end of the ecosystem rules applies it, so
+every path that can produce a tree gets a mature one. Two consequences
+had to be handled: trunk collision radii became radius **per metre of
+height** (tuned so the absolute figures land where they were — pine
+~0.45 m, oak ~0.6 m — and the bike's feel through timber is unchanged),
+and the ground-sink is a flat 0.12 m for trees instead of 6% of scale,
+which at 15 m would have buried the bole.
+
+The silhouettes were rebuilt to match the new size. A pine carries a
+clear bole for its lower third and five narrowing cone tiers above it; a
+fir is tighter, bluer and tiered further down; an oak forks into two
+limbs under a four-lobe crown wider than the tree is tall; a birch holds
+an airy crown on a slim pale trunk. Impostors were re-normalised to the
+same unit height, so a distant tree is scaled by the same number its
+near-ring twin would use and the two rings agree at the LOD boundary.
+
+**Patches: 39, from 212 m to 399 m across**, in three groups — the eight
+spawn-ring patches, a jittered 6x4 open-country grid, and (new) up to
+twelve **roadside stands** seeded off the road vertex list itself, 70-150
+m to one side with a radius that reaches back over the carriageway. Also
+new: trees may stand on a built road's graded apron. `info.trail` merges
+the apron (which fades out as far as 190 m) with the hidden 2.5 m
+shortcut trails, and rejecting every candidate touched by either is what
+kept the woods 40 m back from every route. Near a registered road the
+exact 7 m corridor test is now the only gate — it is the real safety
+guarantee — while away from one the tight gate stays so the shortcuts are
+never grown over.
+
+Density measured within 250 m of the rider: 153 at the spawn meadow, 141
+in the pine belt, 116 on the forest road, 104 on the hillside, 141 at the
+ridge — inside the brief's 120-180 band, with bush undergrowth, ferns,
+fallen logs and rock in the same radius. The spawn valley's forced tree
+floor came *down* (it was written for 4 m trees and put 239 trunks inside
+250 m, closing in the meadow the brief wants left open), and the spawn
+grove was thinned and set back to 34-154 m so the trees ring the bowl
+rather than crowd it.
+
+Draw calls at the five view points run 87-94 against a budget of 100.
+Nothing was added to the mesh count: 19 near species plus 5 impostors,
+two shared materials, all instanced. Sward and ferns were dropped from
+the shadow-caster set, and empty species are skipped outright — measured,
+that second one is draw-call neutral, because three.js already early-outs
+on an instance count of zero.
+
 **Hotfix — vegetation integration.** Three chapters of placement work
 kept landing on a world that still read as thin, so this pass audited the
 delivery path instead of the generator. The wiring was sound:
