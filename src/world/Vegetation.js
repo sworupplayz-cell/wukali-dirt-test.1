@@ -68,8 +68,16 @@ const TYPES = [...TREES, ...BUSHES, ...GRASSES, ...FLOWERS, ...GROUND, ...DETAIL
 // logs stay ride-over so they never block a line through a forest).
 const COLL = { pine: 0.42, fir: 0.36, birch: 0.34, oak: 0.55, dead: 0.38 };
 for (const t of [...BUSHES, ...GRASSES, ...FLOWERS, ...GROUND, ...DETAIL]) COLL[t] = 0;
+// HOTFIX (vegetation integration) — oak and birch were the two species
+// the spawn valley is made of and the two whose buffers ran out: 349 oaks
+// existed inside the near window against a 160-instance buffer, so 189 of
+// them were discarded every rebuild. Nearest-first ordering (see
+// cellOrder) means the survivors are now the closest ones, but a buffer
+// smaller than the stand it has to hold still throws away trees the rider
+// can see. Instances are vertex work, not draw calls — these two go up to
+// match what the ecosystem actually places.
 const CAP_NEAR = {
-  pine: 560, fir: 460, birch: 200, oak: 160, dead: 110,
+  pine: 560, fir: 460, birch: 300, oak: 320, dead: 110,
   shrub: 260, bush: 300, mountainBush: 200, dryBush: 220,
   grass: 1000, grassTall: 700, sedge: 420, tussock: 620,
   flower: 900,
@@ -77,6 +85,44 @@ const CAP_NEAR = {
   log: 120, stump: 100, mossRock: 180,
 };
 const CAP_FAR = { pine: 1050, fir: 850, birch: 500, oak: 380, dead: 260 };
+
+/**
+ * HOTFIX (vegetation integration) — cell visit order for a rebuild window,
+ * sorted NEAREST-FIRST instead of raster-scanned from the far corner.
+ *
+ * This is the bug that made the world read as empty. Every species has a
+ * fixed instance capacity (CAP_NEAR) and a plant that arrives after the
+ * cap is full is silently dropped. The window used to be walked
+ * `for dz = -R..R { for dx = -R..R }`, i.e. starting 400+ m away at the
+ * north-west corner and reaching the player's OWN cell halfway through —
+ * so the capacity was spent on trees behind the horizon and the trunks in
+ * front of the rider were the ones thrown away. Measured at spawn: 349
+ * oaks existed in the near window, the 160-instance cap filled with a
+ * median distance of 227 m (max 436 m), and 30 of the 57 oaks within
+ * 120 m never reached the GPU.
+ *
+ * Visiting cells by increasing distance makes the cap keep the CLOSEST
+ * plants, which is the only set the player can actually see. Order is
+ * computed once per radius and cached.
+ */
+const _ORDER = new Map();
+function cellOrder(R) {
+  let o = _ORDER.get(R);
+  if (o) return o;
+  o = [];
+  for (let dz = -R; dz <= R; dz++) {
+    for (let dx = -R; dx <= R; dx++) o.push([dx, dz, dx * dx + dz * dz]);
+  }
+  // Near ring first (it owns the CAP_NEAR budget), then the impostor
+  // ring; inside each band, nearest cell first.
+  o.sort((a, b) => {
+    const an = Math.max(Math.abs(a[0]), Math.abs(a[1])) <= NEAR_R ? 0 : 1;
+    const bn = Math.max(Math.abs(b[0]), Math.abs(b[1])) <= NEAR_R ? 0 : 1;
+    return an !== bn ? an - bn : a[2] - b[2];
+  });
+  _ORDER.set(R, o);
+  return o;
+}
 
 export class Vegetation {
   constructor(scene, field) {
@@ -132,6 +178,12 @@ export class Vegetation {
     this._farR = FAR_R;  // Chapter 3C: impostor ring radius (cells)
     // HOTFIX: ecosystem zones — the backbone of world population.
     this.zones = buildZones(field);
+    // Integration-test hook (see debugForcePines). Off unless asked for.
+    this._forced = null;
+    if (typeof location !== 'undefined' && location.search) {
+      const m = /[?&]forcepines=(\d+)(?:[,x](\d+))?/.exec(location.search);
+      if (m) this._forced = { n: Math.min(+m[1], CAP_NEAR.pine), radius: m[2] ? +m[2] : 100 };
+    }
   }
 
   /**
@@ -193,6 +245,7 @@ export class Vegetation {
    *  animate the grow-in scale of plants that just switched to the near
    *  ring (smooth LOD transition instead of an abrupt swap). */
   update(px, pz) {
+    this._px = px; this._pz = pz;
     const cx = Math.floor(px / CELL), cz = Math.floor(pz / CELL);
     if (cx !== this._pcx || cz !== this._pcz) {
       // Chapter 5: a boundary crossing used to price ~17 brand-new cell
@@ -686,8 +739,10 @@ export class Vegetation {
     const R = this._farR;
     const den = this._density;
     const growNow = performance.now();
-    for (let dz = -R; dz <= R; dz++) {
-      for (let dx = -R; dx <= R; dx++) {
+    const order = cellOrder(R);
+    for (let oi = 0; oi < order.length; oi++) {
+      {
+        const dx = order[oi][0], dz = order[oi][1];
         const ring = Math.max(Math.abs(dx), Math.abs(dz));
         const nearRing = ring <= NEAR_R;
         const groundRing = ring <= GROUND_R;
@@ -766,8 +821,74 @@ export class Vegetation {
     }
     this.visibleNear = vn;
     this.visibleFar = vf;
+    this._applyForcedPines();
     this.collVersion = (this.collVersion || 0) + 1;
     this._nearCells = nowCells;
+  }
+
+  /**
+   * HOTFIX (vegetation integration) — the test instrument required by the
+   * brief: put EXACTLY `n` pine trees in a `radius` metre disc around the
+   * rider and keep them there through every window rebuild.
+   *
+   * It bypasses the ecosystem rules, the density thinning and the cell
+   * caches entirely, so it isolates the last leg of the pipeline —
+   * instance buffer -> InstancedMesh.count -> scene -> framebuffer. If
+   * these do not show up on screen, the failure is integration; if they
+   * do, the failure is placement.
+   *
+   * Off in normal play. Enable with the `?forcepines=50` query flag or
+   * from the console: `world.vegetation.debugForcePines(50, 100)`.
+   * `debugForcePines(0)` restores the real world.
+   */
+  debugForcePines(n = 50, radius = 100) {
+    this._forced = n > 0 ? { n: Math.min(n, CAP_NEAR.pine), radius } : null;
+    if (this._pcx !== null) this._rebuild(this._pcx, this._pcz, Infinity);
+    return {
+      requested: n, radius,
+      pineInstances: this._near.pine.count,
+      pineInScene: this._near.pine.parent !== null,
+      pineVisible: this._near.pine.visible,
+    };
+  }
+
+  /** Overwrite the pine instance buffer with the forced ring (no-op when off). */
+  _applyForcedPines() {
+    const F = this._forced;
+    if (!F) return;
+    const mesh = this._near.pine;
+    const f = this.field;
+    const px = this._px !== undefined ? this._px : this._pcx * CELL + CELL * 0.5;
+    const pz = this._pz !== undefined ? this._pz : this._pcz * CELL + CELL * 0.5;
+    // Golden-angle spiral: an even stand of trunks all the way round the
+    // rider, from just outside the bike out to the requested radius, so
+    // "surrounded" is true in every compass direction rather than in one
+    // convenient one. The radius ramps LINEARLY, not by equal area — an
+    // area-uniform spiral piles four fifths of the stand against the rim
+    // and leaves the foreground bare, which is the exact look this hotfix
+    // exists to disprove.
+    let slot = 0;
+    for (let k = 0; k < F.n && slot < CAP_NEAR.pine; k++) {
+      const a = k * 2.39996;
+      const rad = 12 + (F.radius - 12) * ((k + 0.5) / F.n);
+      const x = px + Math.cos(a) * rad;
+      const z = pz + Math.sin(a) * rad;
+      const s = 1.05 + hash01(k, 7, 0x50f) * 0.45;
+      const y = f.height(x, z) - 0.06 * s;
+      this._write(mesh, slot, {
+        x, y, z, yaw: hash01(k, 8, 0x50e) * 6.283, s,
+        tint: hash01(x | 0, z | 0, 0x51ce),
+      }, 1);
+      slot++;
+    }
+    this.visibleNear += slot - mesh.count;
+    mesh.count = slot;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    // The forced stand is a fixed ring around the rider, so it is rebuilt
+    // whenever the player crosses a cell; grow-in entries would animate
+    // stale slots into it.
+    if (this._growing) this._growing.length = 0;
   }
 
   _compose(p) {

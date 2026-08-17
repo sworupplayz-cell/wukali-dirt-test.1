@@ -186,7 +186,46 @@ carry the colour variety, so three wildflower meshes became one, six
 grasses became four and two logs became one. Five fewer InstancedMeshes
 brought draw calls at the spawn from 99 to **96**.
 
-**Hotfix 5B.3 — spawn relocation.** The spawn stood *on* the 4-way
+**Hotfix — vegetation integration.** Three chapters of placement work
+kept landing on a world that still read as thin, so this pass audited the
+delivery path instead of the generator. The wiring was sound:
+`SectorWorld` constructs `Vegetation`, `vegetation.update(x, z)` runs
+exactly once per rendered frame (measured 21 calls / 21 renders), and all
+24 InstancedMeshes are in `scene.children`, visible and
+`frustumCulled = false`. The defect was downstream of all of that.
+
+Every species has a fixed instance buffer, and a plant that arrives after
+the buffer is full is silently dropped. The rebuild walked the window
+`for dz = -R..R { for dx = -R..R }` — starting at the *far north-west
+corner*, 400+ m out, and reaching the player's own cell halfway through.
+So the buffer was spent on trees near the horizon and the trunks in front
+of the rider were the ones discarded. Measured at the spawn: 349 oaks
+existed inside the near window, the 160-instance buffer filled at a
+median distance of **227 m** (max 436 m), and 30 of the 57 oaks within
+120 m never reached the GPU. The foreground was being deleted to pay for
+the background.
+
+Two changes. Cells are now visited **nearest-first** (near ring before
+impostor ring, closest cell first within each band; the order is computed
+once per radius and cached), so a full buffer keeps the *closest* plants
+— the only ones the player can see. And the oak and birch buffers, the
+two species the spawn valley is actually made of, were sized to the stand
+they have to hold (160 -> 320, 200 -> 300); instances are vertex work,
+not draw calls. Oaks written within 120 m went 27 -> 44 of the 44 that
+survive density thinning, and the near window carries 481 trees where it
+carried 361. Draw calls are unchanged at 96.
+
+The brief's test instrument ships with it: `?forcepines=50` (or
+`world.vegetation.debugForcePines(50, 100)`) replaces the pine buffer
+with exactly 50 trunks on a golden-angle spiral around the rider, ramped
+linearly from 12 m to 100 m and re-applied after every window rebuild.
+It bypasses the ecosystem rules, the thinning and the cell cache, so it
+isolates instance buffer -> mesh count -> scene -> framebuffer: if those
+50 do not appear, the fault is integration; if they do, the fault is
+placement. They appear — 50 instances, nearest 12.9 m, 15 inside a 68 deg
+frustum, no console errors. Off in normal play.
+
+ The spawn stood *on* the 4-way
 junction, so however well the meadow was populated the first frame was a
 wide dirt road filling the bottom third. The spawn moved 44 m into the
 meadow grass at (4026, 2464): the South Arm is 26 m to the west (a dirt
