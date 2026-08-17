@@ -472,7 +472,7 @@ export class Vegetation {
     // back from it. Trunks come in to 7 m from the centreline — 3.5 m of
     // verge beyond the widest bed (a 7 m main) and 4.5 m beyond a pass —
     // so a mature canopy leans over the road without anything to hit.
-    const clearNeed = isTree ? 7 : 4;   // brief: 6 m clear riding corridor
+    const clearNeed = isTree ? 10 : 4;  // brief: 6 m clear riding corridor
     const spx = x - SPAWN_X, spz = z - SPAWN_Z;
     const spawnOk = !isTree || spx * spx + spz * spz > SPAWN_CLEAR * SPAWN_CLEAR;
     const rd = (meadowOk && spawnOk && x >= 30 && x <= 7970 && z >= 30 && z <= 4970 &&

@@ -29,18 +29,30 @@ const DRAIN = 18;         // drop from the interior to the southern shore
 const WEST_RISE = 12;     // west canyon plateau lift
 const EAST_RISE = 14;     // east rise toward the volcanic passes
 const LOW_FLOOR = 44;     // soft inland floor (above SEA_LEVEL 42)
-// Ridge system. Value noise has one period per 1/F metres and the folded
-// ridge transform puts a crest line at every half period, so F = 0.00095
-// lays a scenic crest every ~530 m — inside the 500-800 m target.
-const RIDGE_F = 0.0026;
-const RIDGE_H = 32;       // crest height above the trough line
-const FINE_F = 0.0062;    // fine crests (~190 m) for surface interest
-const FINE_H = 6;
-// Drainage: main valleys every ~900 m with tributaries inside them.
+// Chapter 6A — the grain of the country, under the authored landforms.
+//
+// These used to carry the whole composition, and they were tuned for
+// INTEREST rather than for gradient: 32 m crests every ~190 m and 6 m
+// fine crests every ~80 m put the 95th-percentile slope at 25 deg, well
+// past the 16 deg rideable ceiling, and no amount of it added up to a
+// landscape — it read as texture because that is what it was.
+//
+// The authored valleys and the six ridgelines now carry the shape, so
+// the noise is demoted to the surface grain between them: same character,
+// longer wavelengths, smaller amplitudes. The rule of thumb for a fold of
+// height H and wavelength L is a peak gradient near 2*H/L, so 22 m over
+// ~475 m and 4 m over ~220 m both sit inside the ceiling with room for
+// the authored relief to stack on top.
+const RIDGE_F = 0.0021;   // crest line every ~475 m
+const RIDGE_H = 22;       // crest height above the trough line
+const FINE_F = 0.0045;    // fine crests (~220 m) for surface interest
+const FINE_H = 4;
+// Drainage grain. The four authored valley systems are the drainage now;
+// this is the small stuff that runs into them.
 const VALLEY_F = 0.00055;
-const VALLEY_H = 29;
+const VALLEY_H = 15;
 const TRIB_F = 0.0016;
-const TRIB_H = 11;
+const TRIB_H = 7;
 const CORR_VALE = 9;      // vale carved along every main road corridor
 
 /**
@@ -138,35 +150,49 @@ export class TerrainField {
     const mm = lf.meadowMask(x, z);
     const open = (1 - 0.7 * corr) * (1 - mm);
 
-    // ---- 3. Ridges (crest lines every ~530 m + fine surface relief) ---
+    // ---- 3. Ridges (crest lines + fine surface relief) ----------------
     // Contrast stretch: interpolated value noise only swings about a
     // third of its nominal range, so the raw ridge field reads as a
-    // gentle swell. Stretching it turns the crest lines into actual
-    // ridges with defined troughs between them.
-    const r1 = sstep(0.36, 0.99, ridgeLine(wx * RIDGE_F, wz * RIDGE_F, SEED + 13));
-    const r2 = sstep(0.45, 0.95, ridgeLine(wx * FINE_F + 3.3, wz * FINE_F - 2.7, SEED + 17));
+    // gentle swell. Chapter 6A widens the stretch window (0.36-0.99 ->
+    // 0.30-1.04): the crest lines still read, but the transition is
+    // spread over more ground, which is where most of the old 25 deg
+    // 95th-percentile slope was coming from.
+    const r1 = sstep(0.30, 1.04, ridgeLine(wx * RIDGE_F, wz * RIDGE_F, SEED + 13));
+    const r2 = sstep(0.40, 1.00, ridgeLine(wx * FINE_F + 3.3, wz * FINE_F - 2.7, SEED + 17));
     h += (RIDGE_H * r1 * relief + FINE_H * r2) * open;
 
     // ---- 4. Erosion: dendritic valley network -------------------------
     // Tributaries only exist where a main valley already runs, which is
     // what makes the network read as water-carved rather than noisy.
-    const v1 = sstep(0.44, 0.98, ridgeLine(wx * VALLEY_F - 8.8, wz * VALLEY_F + 5.5, SEED + 23));
-    const v2 = sstep(0.5, 0.97, ridgeLine(wx * TRIB_F + 2.2, wz * TRIB_F - 9.4, SEED + 29));
+    const v1 = sstep(0.40, 1.02, ridgeLine(wx * VALLEY_F - 8.8, wz * VALLEY_F + 5.5, SEED + 23));
+    const v2 = sstep(0.46, 1.00, ridgeLine(wx * TRIB_F + 2.2, wz * TRIB_F - 9.4, SEED + 29));
     const main = v1;
     const flow = 0.55 + 0.45 * sstep(-1, 0.9, nz);   // deeper downstream
     h -= (VALLEY_H * main + TRIB_H * v2 * v2 * sstep(0.35, 0.75, v1)) *
       flow * (0.5 + 0.5 * relief) * open;
 
     // ---- 5. Benches: short escarpments on the hill flanks -------------
-    h += 7 * sstep(0.44, 0.66, r1) * sstep(0.55, 0.85, relief) * open;
+    h += 5 * sstep(0.40, 0.70, r1) * sstep(0.55, 0.85, relief) * open;
 
-    // ---- 5b. Chapter 5A authored macro-landforms ----------------------
-    // Named structure on top of the eroded grain: four ridge systems,
-    // three large basins and the plateaus. All corridor-aware, all
-    // smooth blobs, so they add shape without adding a single wall.
+    // ---- 5b. Chapter 5A/6A authored macro-landforms -------------------
+    // Named structure on top of the eroded grain: six ridge systems, four
+    // valley systems, three large basins and the plateaus. All
+    // corridor-aware, all smooth analytic profiles, so they add shape
+    // without adding a single wall.
+    //
+    // ORDER MATTERS. The valleys are cut LAST of the four, so a trunk
+    // running past the toe of a ridge still owns its own floor instead of
+    // being back-filled by the ridge skirt — which is what makes the two
+    // read as one landform (a ridge ABOVE a valley) rather than two
+    // features that happen to overlap.
     h += lf.ridgeSystems(x, z, corr) * (1 - mm);
     h += lf.plateauLift(x, z, corr) * (1 - mm);
-    h -= lf.basinDepth(x, z, corr) * (1 - mm);
+    // Basins and valleys are both excavations, and they MERGE rather than
+    // sum: a basin is where valleys end, so a trunk running into one has
+    // to settle onto its floor, not dig a second trough through it.
+    // Summing them cost 10 m at the Twin Lakes confluence — enough to put
+    // a landmark under the waterline once the lake carve came off.
+    h -= Math.max(lf.basinDepth(x, z, corr), lf.valleyDepth(x, z, corr)) * (1 - mm);
 
     // ---- 6. Roads follow valleys --------------------------------------
     // Every main corridor carries a shallow vale of its own, so a road

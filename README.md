@@ -186,6 +186,54 @@ carry the colour variety, so three wildflower meshes became one, six
 grasses became four and two logs became one. Five fewer InstancedMeshes
 brought draw calls at the spawn from 99 to **96**.
 
+**Chapter 6A — macro terrain composition.** The lowland was carrying its
+whole shape in noise: ridged fields at ~190 m and ~80 m wavelengths that
+were statistically interesting and structurally meaningless. A quarter of
+the interior sat pan-flat (under 6 m of relief across a 500 m circle)
+while the 95th-percentile slope stood at 25 deg — a plain with a rash on
+it. Nothing a rider crossed related to anything else.
+
+The composition is now authored and the noise is demoted to grain.
+
+**Four valley systems** (`VALLEY_SYSTEMS`) are polyline trunks with a
+flat floor and a quartic wall. Fernwater, Kingsmere and Emberflow run
+north to south down the continental tilt; **Southmarch** gathers them
+along the coastal plain, so water — and a rider — can go from the
+northern foothills to the sea without climbing out of a valley. They are
+deliberately wide and shallow: 26 m over a 380 m half-width is a 6.4 deg
+wall, and a valley you can see across is what connects a landscape,
+where a ravine would just be a wall with a floor.
+
+**Six ridgelines**, up from four, each running the length of the country
+it divides, with two new ones closing the north-east interior (Halcyon)
+and standing between the basins and the coastal plain (Sable). Every
+flank got wider for the same height: with the quartic profile the
+steepest gradient is `h * 1.54 / w`, so the old 50 m over 250 m stood at
+17.1 deg — past the rideable ceiling — while 52 m over 340 m stands at
+13.2 deg. **Gentle cliffs** come from a terrace band on the outer flank,
+peaking at 0.9 of the half-width where the profile has already gone
+slack; a step nearer the crest lands on the steepest part at u~0.58 and
+the two gradients add into something unrideable, which is exactly what
+the first attempt did (29.5 deg).
+
+**Basins and valleys merge rather than sum** — a basin is where valleys
+end, so a trunk running into one settles onto its floor instead of
+digging a second trough through it. Summing them cost 10 m at the Twin
+Lakes confluence, enough to put a landmark under the waterline once the
+lake carve came off.
+
+Measured over the interior (clear of the border-mountain band, above
+water): **93.7% of ground is rideable at 16 deg or less**, median slope
+4.1 deg, p95 16.9 deg. Off the road corridors and the authored Red
+Canyon it is 92.7% with a 26.1 deg maximum — those maxima are the ridge
+terraces and the plateau rims, i.e. the gentle cliffs the brief asked
+for. Pan-flat interior fell from 24.4% to 19.2% while median relief over
+a 300 m circle rose from 10.7 m to 13.8 m: less flat AND less steep,
+because the relief moved from noise into structure. Border massifs
+remain strictly at the edges — zero massif samples more than 1,120 m
+inland. `tools/verify6a.mjs`, `tools/preflight6a.mjs` and
+`tools/routes6a.mjs` reproduce all of these numbers.
+
 **Chapter 5D — mature forest rebuild.** The trees were too small to be
 woodland. A "pine" topped out at 6.7 m and an "oak" at 4.4 m, so a rider
 looked *over* the forest instead of into it — which is what made it read

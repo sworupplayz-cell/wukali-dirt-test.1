@@ -67,15 +67,69 @@ const S = 733;
 // a polyline; the crest undulates along its length and drops to saddles
 // between the named high points, which is what makes a ridge read as a
 // range rather than a wall.
+// Chapter 6A: SIX ridgelines, not four, and each one runs the length of
+// the country it divides instead of sitting in the middle of it. Two
+// things changed besides the count. The spines carry more points, so a
+// crest meanders over 2-4 km and reads as continuous from any viewpoint
+// on it. And every flank is WIDER for the same height: with the quartic
+// profile the steepest gradient is h * 1.54 / w, so the old 50 m over
+// 250 m stood at 17.1 deg — over the 16 deg rideable ceiling — while
+// 52 m over 340 m stands at 13.2 deg and can be ridden straight up.
+//
+// `bench` adds a terrace on the outer flank: a short escarpment placed
+// where the quartic profile has already gone slack, so the shelf reads
+// as a small cliff line along the ridge without the two gradients
+// stacking into something unrideable (see ridgeSystems).
 const RIDGE_SYSTEMS = [
-  { name: 'Sentinel Ridge', h: 50, w: 250, wave: 0.34,
-    pts: [[1500, 2060], [2050, 1980], [2600, 2090], [3060, 2210]] },
-  { name: 'Larkspur Ridge', h: 44, w: 235, wave: 0.40,
-    pts: [[1560, 3060], [2150, 3160], [2720, 3080], [3160, 2990]] },
-  { name: 'Ember Ridge', h: 48, w: 245, wave: 0.36,
-    pts: [[5040, 3030], [5600, 3130], [6160, 3050], [6640, 2900]] },
-  { name: 'Vanguard Ridge', h: 52, w: 255, wave: 0.32,
-    pts: [[5090, 1980], [5650, 1890], [6210, 1960], [6690, 2110]] },
+  { name: 'Sentinel Ridge', h: 52, w: 340, wave: 0.34, bench: 4,
+    pts: [[1180, 2120], [1760, 2020], [2340, 2060], [2900, 2170], [3380, 2250]] },
+  { name: 'Larkspur Ridge', h: 46, w: 320, wave: 0.40, bench: 4,
+    pts: [[1300, 3120], [1900, 3210], [2500, 3160], [3060, 3040], [3520, 2960]] },
+  { name: 'Ember Ridge', h: 50, w: 335, wave: 0.36, bench: 4,
+    pts: [[4720, 2980], [5320, 3110], [5900, 3120], [6420, 3000], [6860, 2860]] },
+  { name: 'Vanguard Ridge', h: 54, w: 345, wave: 0.32, bench: 4,
+    pts: [[4760, 2010], [5360, 1900], [5960, 1900], [6480, 2010], [6900, 2140]] },
+  // Chapter 6A additions: a northern chain closing the top of the
+  // interior, and a southern one standing between the basins and the
+  // coastal plain, so the lowland is divided into rooms on both axes.
+  //
+  // Halcyon sits in the north-east interior rather than north-centre.
+  // The centre-north strip (x 2450-4050, z 1250-1560) is the only line
+  // the world has to keep rideable cross-country, and a 42 m ridge laid
+  // across it raised the ground 12 m and put a sustained 18-20 deg flank
+  // where there had been 2 samples over 16. It also has to clear
+  // Vanguard's north skirt (reach z 1555) and stop short of the
+  // Emberflow trunk so the valley is not silled.
+  { name: 'Halcyon Ridge', h: 42, w: 290, wave: 0.38, bench: 4,
+    pts: [[4350, 1190], [4670, 1120], [4990, 1145], [5300, 1215]] },
+  { name: 'Sable Ridge', h: 42, w: 305, wave: 0.42, bench: 4,
+    pts: [[3960, 3660], [4560, 3760], [5180, 3720], [5740, 3600], [6260, 3480]] },
+];
+
+// ---- Chapter 6A: 4 LARGE VALLEY SYSTEMS ------------------------------------
+// The drainage used to be pure ridged noise — statistically valley-like,
+// but with no trunk a rider could follow and no reason for any two parts
+// of the map to relate. These are authored trunks: broad, shallow,
+// continuous, and connected. Three run north to south down the tilt of
+// the continent and the fourth gathers them along the coastal plain, so
+// water (and a rider) can run from the northern foothills to the sea
+// without ever climbing out of a valley.
+//
+// They are deliberately WIDE and SHALLOW: 26 m over a 360 m half-width
+// is a 6.4 deg maximum wall. A valley you can see across and ride out of
+// in any direction is what makes the map feel like one connected
+// landscape; a ravine would just be a wall with a floor.
+const VALLEY_SYSTEMS = [
+  { name: 'Fernwater Valley', d: 26, w: 380, flat: 0.34,
+    pts: [[1230, 880], [1160, 1620], [1290, 2360], [1230, 3080], [1380, 3820], [1520, 4260]] },
+  { name: 'Kingsmere Valley', d: 24, w: 360, flat: 0.32,
+    pts: [[3480, 900], [3420, 1580], [3540, 2260], [3460, 2960], [3580, 3640], [3700, 4220]] },
+  { name: 'Emberflow Valley', d: 25, w: 370, flat: 0.33,
+    pts: [[5880, 980], [5980, 1660], [5840, 2340], [5960, 3020], [6120, 3700], [6240, 4240]] },
+  // The collector: an east-west trunk across the southern plain that
+  // every other valley drains into before the coast.
+  { name: 'Southmarch Valley', d: 22, w: 400, flat: 0.36,
+    pts: [[1400, 4120], [2600, 4200], [3800, 4180], [5000, 4160], [6200, 4120], [7150, 4020]] },
 ];
 
 // 3 LARGE BASINS — wide, shallow, flat-floored bowls. They are the
@@ -335,6 +389,7 @@ export class Landforms {
       viewpoints: this.viewpoints.length,
       majorViewpoints: this.majorViewpoints ? this.majorViewpoints.length : 0,
       ridgeSystems: RIDGE_SYSTEMS.length,
+      valleySystems: VALLEY_SYSTEMS.length,
       basins: BASINS.length,
       plateaus: PLATEAUS.length,
       crystalLakes: LAKES.filter((l) => l.crystal).length,
@@ -548,7 +603,19 @@ export class Landforms {
       const t = (seg + u) / (r.pts.length - 1);
       const crest = 1 - r.wave * (0.5 - 0.5 * Math.cos(t * Math.PI * 2 * (r.pts.length - 1)));
       const rough = 1 + 0.16 * (vnoise(x * 0.0035 + 12.7, z * 0.0035 - 4.3, S + 61) - 0.5);
-      const v = r.h * crest * rough * q4(d / r.w);
+      let v = r.h * crest * rough * q4(d / r.w);
+      // Chapter 6A — GENTLE CLIFFS ALONG THE RIDGE EDGES. A terrace band
+      // on the OUTER flank, peaking at 0.9 of the half-width where the
+      // quartic profile has already gone slack (its gradient there is
+      // about 7 deg). A step nearer the crest lands on the profile's
+      // steepest part at u~0.58 and the two gradients add into something
+      // unrideable, which is exactly what the first attempt at this did.
+      // 4 m spread over 0.12 of the half-width keeps the sum near 16 deg:
+      // a low escarpment you ride along looking for the ramp.
+      if (r.bench) {
+        const u = d / r.w;
+        v += r.bench * crest * sstep(0.78, 0.90, u) * sstep(1.0, 0.90, u);
+      }
       if (v > add) add = v;
     }
     return add * (1 - 0.72 * corr);
@@ -567,16 +634,38 @@ export class Landforms {
     return cut * (1 - 0.45 * corr);
   }
 
-  /** Chapter 5A plateaus: flat tables on a ~28 deg rim ("gentle cliffs"). */
-  plateauLift(x, z, corr) {
-    let add = 0;
-    for (const p of PLATEAUS) {
-      const d = Math.hypot(x - p.x, z - p.z);
-      if (d >= p.r + 40) continue;
-      const v = p.h * (1 - sstep(p.rim, p.r, d));
-      if (v > add) add = v;
+  /**
+   * Chapter 6A: the four authored valley systems. A broad flat-bottomed
+   * trough along each trunk — flat out to `flat` of the half-width, then
+   * a quartic wall out to the full width. Depths take the DEEPEST valley
+   * at a point rather than summing, so where two trunks meet the floors
+   * merge into one confluence instead of digging a pit.
+   *
+   * `corr` softens the carve along a main road corridor. The corridors
+   * already sit in the valley floors by design, so this only stops a
+   * road that crosses a trunk from dropping into it and back out.
+   */
+  valleyDepth(x, z, corr) {
+    let cut = 0;
+    for (const v of VALLEY_SYSTEMS) {
+      const bb = v._bb || (v._bb = ridgeBBox({ pts: v.pts, w: v.w }));
+      if (x < bb[0] || x > bb[1] || z < bb[2] || z > bb[3]) continue;
+      let d2 = Infinity;
+      for (let i = 0; i < v.pts.length - 1; i++) {
+        const a = v.pts[i], b = v.pts[i + 1];
+        segNearest(x, z, a[0], a[1], b[0], b[1]);
+        if (_SN.d2 < d2) d2 = _SN.d2;
+      }
+      const d = Math.sqrt(d2);
+      if (d >= v.w) continue;
+      const u = d / v.w;
+      // Flat floor, then a smooth wall. A little meander on the wall so
+      // the trough is not a perfectly parallel-sided ditch.
+      const wob = 1 + 0.14 * (vnoise(x * 0.0028 - 5.1, z * 0.0028 + 7.6, S + 71) - 0.5);
+      const dep = v.d * wob * (u <= v.flat ? 1 : q4((u - v.flat) / (1 - v.flat)));
+      if (dep > cut) cut = dep;
     }
-    return add * (1 - 0.6 * corr);
+    return cut * (1 - 0.5 * corr);
   }
 
   /** Named landform under a point (debug/report tooling). */
@@ -590,8 +679,28 @@ export class Landforms {
         if (_SN.d2 < r.w * r.w) return r.name;
       }
     }
+    for (const v of VALLEY_SYSTEMS) {
+      for (let i = 0; i < v.pts.length - 1; i++) {
+        const a = v.pts[i], b = v.pts[i + 1];
+        segNearest(x, z, a[0], a[1], b[0], b[1]);
+        if (_SN.d2 < v.w * v.w) return v.name;
+      }
+    }
     return null;
   }
+
+  /** Chapter 5A plateaus: flat tables on a ~28 deg rim ("gentle cliffs"). */
+  plateauLift(x, z, corr) {
+    let add = 0;
+    for (const p of PLATEAUS) {
+      const d = Math.hypot(x - p.x, z - p.z);
+      if (d >= p.r + 40) continue;
+      const v = p.h * (1 - sstep(p.rim, p.r, d));
+      if (v > add) add = v;
+    }
+    return add * (1 - 0.6 * corr);
+  }
+
 
   /** True inside a lake's water surface — nothing is planted or scattered
    *  there (Chapter 5A: the crystal lakes had pines standing in them). */
