@@ -164,6 +164,28 @@ walks only each cell's tree prefix. Colour variation is per-INSTANCE
 shades without a second material or draw call. Measured streaming cost
 over a 90 s ride: 855 ms total, p95 0.2 ms, p99 3.1 ms per frame.
 
+**Chapter 5C — vegetation rebuild.** Placement was rebuilt around three
+ideas. **27 forest patches** of 180-350 m across, each with a lobed
+(never circular) outline from three angular harmonics, a dense core, a
+natural edge and an interior clearing in one patch out of three, laid on
+a jittered grid plus eight patches ringing the spawn. **One ecosystem
+rule set** read top to bottom — spawn valley: open meadow with scattered
+oak and birch; rolling hills: mixed woods; mountain slopes above 150 m:
+dense pine and fir; ridge crests: sparse; basins: bushes and flowers;
+lake shores: sedge, grass and the odd birch; dunes: bunch grass — with a
+6 m clear riding corridor on every road. And a **spawn grove** placed
+explicitly in polar coordinates: two golden-angle spirals around the
+spawn point (21-77 m and 60-140 m), jittered, filtered by the same road,
+water and slope rules, with a riding lane kept open along the spawn
+heading. A cell budget can only populate a region on average; the spiral
+is what makes a specific 120 m circle look the same in all eight
+directions.
+
+The species set was consolidated at the same time — per-instance tints
+carry the colour variety, so three wildflower meshes became one, six
+grasses became four and two logs became one. Five fewer InstancedMeshes
+brought draw calls at the spawn from 99 to **96**.
+
 **Hotfix 5B.3 — spawn relocation.** The spawn stood *on* the 4-way
 junction, so however well the meadow was populated the first frame was a
 wide dirt road filling the bottom third. The spawn moved 44 m into the

@@ -49,15 +49,17 @@ const nowMs = typeof performance !== 'undefined' && performance.now
 // two materials. A mesh with zero instances costs no draw call (three.js
 // skips instanceCount 0), so biome gating keeps the visible set small:
 // reeds only appear near water, alpine grass only high up, and so on.
+// Chapter 5C: the species set is consolidated. Colour variety now comes
+// from per-INSTANCE tints (see _write), so three wildflower meshes became
+// one, six grasses became four and the two logs became one — five fewer
+// InstancedMeshes competing for the draw-call budget, with the same range
+// of shapes and colours on screen.
 const TREES = ['pine', 'fir', 'oak', 'birch', 'dead'];
-// The four bushes of the brief: small shrub, round bush, mountain bush,
-// dry bush. (Ferns are ground cover, with the clover patches.)
 const BUSHES = ['shrub', 'bush', 'mountainBush', 'dryBush'];
-const GRASSES = ['grass', 'grassTall', 'sedge', 'tussock', 'reed', 'alpineGrass'];
-const FLOWERS = ['flowerY', 'flowerP', 'flowerW'];
+const GRASSES = ['grass', 'grassTall', 'sedge', 'tussock'];
+const FLOWERS = ['flower'];
 const GROUND = ['fern', 'clover'];
-// Forest-floor detail: fallen logs, stumps and mossy boulders.
-const DETAIL = ['logFallen', 'logMossy', 'stump', 'mossRock'];
+const DETAIL = ['log', 'stump', 'mossRock'];
 // Small ground cover: culled to the inner ring (see GROUND_R).
 const SWARD = {};
 for (const t of [...GRASSES, ...FLOWERS, 'clover']) SWARD[t] = true;
@@ -68,11 +70,11 @@ const COLL = { pine: 0.42, fir: 0.36, birch: 0.34, oak: 0.55, dead: 0.38 };
 for (const t of [...BUSHES, ...GRASSES, ...FLOWERS, ...GROUND, ...DETAIL]) COLL[t] = 0;
 const CAP_NEAR = {
   pine: 560, fir: 460, birch: 200, oak: 160, dead: 110,
-  shrub: 200, bush: 240, mountainBush: 160, dryBush: 180,
-  grass: 900, grassTall: 620, sedge: 320, tussock: 520, reed: 160, alpineGrass: 380,
-  flowerY: 420, flowerP: 360, flowerW: 320,
-  fern: 240, clover: 460,
-  logFallen: 70, logMossy: 60, stump: 90, mossRock: 140,
+  shrub: 260, bush: 300, mountainBush: 200, dryBush: 220,
+  grass: 1000, grassTall: 700, sedge: 420, tussock: 620,
+  flower: 900,
+  fern: 300, clover: 520,
+  log: 120, stump: 100, mossRock: 180,
 };
 const CAP_FAR = { pine: 1050, fir: 850, birch: 500, oak: 380, dead: 260 };
 
@@ -286,6 +288,12 @@ export class Vegetation {
     // sets the species mix...
     const zh = zoneAt(this.zones, ox + CELL * 0.5, oz + CELL * 0.5);
     const zoneKind = zh ? zh.zone.kind : null;
+    // Named landform under the cell: basins grow bushes and flowers,
+    // ridge crests stay sparse so the viewpoints keep their outlook.
+    const land = this.field.landforms.landformAt(ox + CELL * 0.5, oz + CELL * 0.5);
+    const basin = !!land && land.indexOf('Basin') >= 0;
+    const ridge = !!land && land.indexOf('Ridge') >= 0;
+    if (ridge) nTrees = Math.round(nTrees * 0.35);          // sparse ridges
     if (zh) {
       const k = 1 + 2.4 * zh.w;
       nTrees = Math.min(38, Math.round((nTrees + 3) * k));
@@ -301,8 +309,8 @@ export class Vegetation {
     const dsx = ox + CELL * 0.5 - SPAWN_X, dsz = oz + CELL * 0.5 - SPAWN_Z;
     const dSpawn = Math.hypot(dsx, dsz);
     if (dSpawn < 520) {
-      const k = 1 - sstep(180, 520, dSpawn);
-      nTrees = Math.max(nTrees, Math.round(9 + 11 * k));
+      const k = 1 - sstep(140, 520, dSpawn);
+      nTrees = Math.max(nTrees, Math.round(26 + 26 * k));
       nGround = Math.max(nGround, Math.round(14 + 10 * k));
     }
 
@@ -324,7 +332,8 @@ export class Vegetation {
     }
     return {
       cx, cz, key: cx * CKEY + cz,
-      ox, oz, rng, forest, elev, nTrees, clusters, zoneKind,
+      ox, oz, rng, forest, elev, nTrees, clusters, zoneKind, basin,
+      spawnValley: dSpawn < 460,
       total: nTrees + nGround, i: 0, list: [],
     };
   }
@@ -335,7 +344,7 @@ export class Vegetation {
     const lf = f.landforms;
     const info = this._info;
     const rng = job.rng;
-    const { forest, nTrees, clusters, zoneKind } = job;
+    const { forest, nTrees, clusters, zoneKind, basin } = job;
     const i = job.i++;
     const isTree = i < nTrees;
     // Scatter inside a stand: dense core, thinning edge, glade in the
@@ -358,10 +367,10 @@ export class Vegetation {
     // Sward returns immediately outside it and light trees from 200 m, so
     // the player spawns in a meadow that is visibly surrounded by
     // vegetation rather than on an empty plain.
-    const meadowOk = isTree ? dMeadow2 >= 46 * 46 : dMeadow2 >= 32 * 32;
+    const meadowOk = isTree ? dMeadow2 >= 30 * 30 : dMeadow2 >= 24 * 24;
     // Roads keep a clear riding corridor: 11 m for anything with a trunk,
     // 6 m for sward, so the verge is alive but the bed never is.
-    const clearNeed = isTree ? 11 : 6;
+    const clearNeed = isTree ? 9 : 6;   // brief: 6 m clear riding corridor
     const spx = x - SPAWN_X, spz = z - SPAWN_Z;
     const spawnOk = !isTree || spx * spx + spz * spz > SPAWN_CLEAR * SPAWN_CLEAR;
     if (meadowOk && spawnOk && x >= 30 && x <= 7970 && z >= 30 && z <= 4970 &&
@@ -386,59 +395,61 @@ export class Vegetation {
         if (sl <= slopeMax && !(onCrest && rng() > 0.32)) {
           const r = rng(), rr = rng();
           let t = null, s = 1, ok = true;
+          // ---- ECOSYSTEMS (Chapter 5C) --------------------------------
+          // One rule set, read top to bottom: the ecosystem is decided by
+          // where the candidate is, and it decides what grows there.
+          const spawnValley = dMeadow2 < 620 * 620;
           if (isTree) {
-            if (h > 1250) ok = false;              // above the tree line
-            else if (h > 150) {
+            if (h > 1250) {
+              ok = false;                                   // above the tree line
+            } else if (h > 150) {
               // MOUNTAIN SLOPES: dense pine and fir, dead snags in dry
-              // ground, mountain bush and mossy boulders underneath.
-              t = h > 620 && r < 0.3 ? 'dead' : r < 0.58 ? 'pine' : 'fir';
+              // ground, mountain bush and mossy stone beneath them.
+              t = h > 620 && r < 0.3 ? 'dead' : r < 0.6 ? 'pine' : 'fir';
               if (rr > 0.9) t = rr > 0.96 ? 'mossRock' : 'mountainBush';
+            } else if (spawnValley) {
+              // SPAWN VALLEY: an open meadow with scattered oak and birch.
+              t = r < 0.46 ? 'oak' : r < 0.9 ? 'birch' : 'bush';
             } else {
-              // ROLLING HILLS: mixed broadleaf woods.
-              t = r < 0.4 ? 'birch' : r < 0.7 ? 'oak' : rr < 0.5 ? 'pine' : 'bush';
+              // ROLLING HILLS: mixed broadleaf woods with some conifer.
+              t = r < 0.36 ? 'birch' : r < 0.66 ? 'oak' : rr < 0.5 ? 'pine' : 'bush';
             }
-            // An ecosystem zone stamps its own character on the stand.
-            if (zoneKind === 'pine') t = r < 0.62 ? 'pine' : r < 0.9 ? 'fir' : 'dead';
-            else if (zoneKind === 'birch') t = r < 0.68 ? 'birch' : r < 0.86 ? 'oak' : 'bush';
-            else if (zoneKind === 'thicket') t = r < 0.45 ? 'bush' : r < 0.7 ? 'shrub' : r < 0.9 ? 'oak' : 'dryBush';
-            else if (zoneKind === 'flower' && r > 0.55) t = r < 0.8 ? 'birch' : 'bush';
-            if (info.moist < 0.25 && rr < 0.32) t = 'dead';
-            // Random scale 0.85-1.25 (brief), random yaw below.
-            s = 0.85 + rng() * 0.4;
-            // Forest floor timber: logs, stumps and moss rocks, only in
-            // real woodland.
-            // Forest-floor detail: each STAND carries one kind of debris
-            // (its seed picks it), so a wood shows logs or stumps or
-            // mossy boulders rather than all four at once — which keeps
-            // the number of instanced meshes drawn in any one place low.
+            // A forest patch stamps its own character on its stands.
+            if (zoneKind === 'pine' && !spawnValley) t = r < 0.62 ? 'pine' : r < 0.9 ? 'fir' : 'dead';
+            else if (zoneKind === 'birch') t = r < 0.66 ? 'birch' : r < 0.88 ? 'oak' : 'bush';
+            else if (zoneKind === 'thicket') t = r < 0.42 ? 'bush' : r < 0.68 ? 'shrub' : r < 0.9 ? 'oak' : 'dryBush';
+            if (info.moist < 0.25 && rr < 0.3 && !spawnValley) t = 'dead';
+            s = 0.85 + rng() * 0.4;                        // brief: 0.85-1.25
+            // Forest floor timber: one kind of debris per stand.
             if (forest > 0.55 && rr > 0.88) {
-              t = c.seed < 0.3 ? 'logFallen' : c.seed < 0.55 ? 'stump'
-                : c.seed < 0.8 ? 'mossRock' : 'logMossy';
+              t = c.seed < 0.45 ? 'log' : c.seed < 0.75 ? 'stump' : 'mossRock';
               s = 0.85 + rng() * 0.4;
             }
           } else if (h > 900 && sl <= 0.4) {
-            // Alpine mat above the forest: less grass, more rock.
-            t = r < 0.5 ? 'alpineGrass' : r < 0.78 ? 'mountainBush' : 'mossRock';
-            s = 0.7 + rng() * 0.4;
+            // ALPINE mat above the forest: low grass, juniper, stone.
+            t = r < 0.42 ? 'sedge' : r < 0.74 ? 'mountainBush' : 'mossRock';
+            s = 0.65 + rng() * 0.35;
           } else if (sl > 0.4) {
             ok = false;
           } else if (dune) {
-            // Dune grass and dry brush on the sand.
-            if (isTree) ok = false;
-            else { t = r < 0.62 ? 'tussock' : r < 0.86 ? 'dryBush' : 'grass'; s = 0.7 + rng() * 0.4; }
+            // Coastal dunes: bunch grass and dry brush on the sand.
+            t = r < 0.62 ? 'tussock' : r < 0.86 ? 'dryBush' : 'grass';
+            s = 0.7 + rng() * 0.4;
           } else if (lakeNear(lf, x, z)) {
-            // LAKESHORE: grass and reeds at the water, the odd birch.
-            t = r < 0.5 ? 'reed' : r < 0.78 ? 'sedge' : r < 0.9 ? 'grass' : 'birch';
-            s = t === 'birch' ? 0.85 + rng() * 0.4 : 0.8 + rng() * 0.5;
+            // LAKESHORE: sedge and grass at the water, the odd birch.
+            t = r < 0.5 ? 'sedge' : r < 0.82 ? 'grass' : 'birch';
+            s = t === 'birch' ? 0.85 + rng() * 0.4 : 0.85 + rng() * 0.5;
           } else if (h > 150) {
             // Mountain slopes carry little sward and plenty of stone.
-            t = r < 0.34 ? 'alpineGrass' : r < 0.6 ? 'mossRock'
-              : r < 0.88 ? 'mountainBush' : 'tussock';
+            t = r < 0.32 ? 'tussock' : r < 0.6 ? 'mossRock'
+              : r < 0.88 ? 'mountainBush' : 'shrub';
             s = 0.72 + rng() * 0.45;
+          } else if (basin) {
+            // BASINS: bushes and flowers, the open flowery bottoms.
+            t = r < 0.3 ? 'bush' : r < 0.5 ? 'shrub' : r < 0.86 ? 'flower' : 'grassTall';
+            s = 0.8 + rng() * 0.5;
           } else if (forest > 0.5) {
-            // Forest floor: ferns, brush, clover and moss.
-            // Forest floor: a stand is either a fern floor or a clover
-            // floor, with brush through it.
+            // Forest floor: ferns or clover, brush and moss.
             const floor = c.seed < 0.55 ? 'fern' : 'clover';
             t = r < 0.42 ? floor : r < 0.66 ? 'bush' : r < 0.86 ? 'shrub' : 'mossRock';
             s = 0.75 + rng() * 0.5;
@@ -447,25 +458,14 @@ export class Vegetation {
             t = r < 0.48 ? 'tussock' : r < 0.7 ? 'dryBush' : r < 0.88 ? 'grass' : 'shrub';
             s = 0.75 + rng() * 0.5;
           } else {
-            // SPAWN VALLEY / damp open meadow: mixed sward, clover and
-            // wildflower drifts. The stand's own seed picks which colour
-            // dominates, so drifts come out single-coloured like real ones.
-            // Meadow sward: two grasses, the stand's own third species
-            // (sedge in damp ground, tussock in dry, clover in between)
-            // and its own flower colour.
+            // Damp open meadow: mixed sward, clover and flower drifts.
             const third = info.moist > 0.55 ? 'sedge' : c.seed < 0.5 ? 'clover' : 'tussock';
-            // A flower-field ecosystem is mostly blossom.
-            if (zoneKind === 'flower' && r > 0.28) {
-              t = c.seed < 0.4 ? 'flowerY' : c.seed < 0.75 ? 'flowerP' : 'flowerW';
-            } else if (r < 0.32) t = 'grass';
+            if (zoneKind === 'flower' && r > 0.28) t = 'flower';
+            else if (r < 0.32) t = 'grass';
             else if (r < 0.56) t = 'grassTall';
             else if (r < 0.72) t = third;
-            else if (r < 0.94) {
-              t = c.seed < 0.4 ? 'flowerY' : c.seed < 0.75 ? 'flowerP' : 'flowerW';
-            } else t = 'shrub';
-            // Sward stays close to life size — coverage comes from the
-            // dense on-demand top-up inside the culling ring, not from
-            // oversized tufts (those read as cardboard from the saddle).
+            else if (r < 0.94) t = 'flower';
+            else t = 'shrub';
             s = t === 'shrub' ? 0.8 + rng() * 0.5 : 0.9 + rng() * 0.5;
           }
           if (ok && t) {
@@ -542,24 +542,24 @@ export class Vegetation {
       // Bushes, ferns, logs and stones read from much further away than
       // a grass tuft, so the close-range mix carries a healthy share.
       if (rr > (nearSpawn ? 0.78 : 0.9) && h < 900) {
-        t = rr > 0.975 ? 'logFallen' : rr > 0.95 ? 'mossRock'
+        t = rr > 0.975 ? 'log' : rr > 0.95 ? 'mossRock'
           : rr > 0.9 ? 'fern' : rr > 0.85 ? 'bush' : 'shrub';
-        const s2 = t === 'logFallen' ? 0.85 + rng() * 0.35 : 0.8 + rng() * 0.5;
+        const s2 = t === 'log' ? 0.85 + rng() * 0.35 : 0.8 + rng() * 0.5;
         const y2 = Math.min(h, f.height(x + 0.7, z), f.height(x, z + 0.7)) - 0.06 * s2;
         list.push({ t, x, z, y: y2, yaw: rng() * 6.283, s: s2,
           tint: hash01(x | 0, z | 0, 0x51ce), tree: false });
         continue;
       }
-      if (h > 900) t = r < 0.7 ? 'alpineGrass' : 'tussock';
-      else if (h > 150) t = r < 0.45 ? 'tussock' : r < 0.8 ? 'grass' : 'alpineGrass';
+      if (h > 900) t = r < 0.7 ? 'sedge' : 'tussock';
+      else if (h > 150) t = r < 0.45 ? 'tussock' : r < 0.8 ? 'grass' : 'sedge';
       else if (flowerZone && r > 0.35) {
-        t = d.seed < 0.4 ? 'flowerY' : d.seed < 0.75 ? 'flowerP' : 'flowerW';
+        t = 'flower';
       } else if (info.moist < 0.34) {
         t = r < 0.55 ? 'tussock' : r < 0.85 ? 'grass' : 'dryBush';
       } else {
         t = r < 0.34 ? 'grass' : r < 0.6 ? 'grassTall'
           : r < 0.72 ? (info.moist > 0.55 ? 'sedge' : 'clover')
-            : r < 0.9 ? (d.seed < 0.4 ? 'flowerY' : d.seed < 0.75 ? 'flowerP' : 'flowerW')
+            : r < 0.9 ? 'flower'
               : 'clover';
       }
       const s = t === 'dryBush' ? 0.8 + rng() * 0.4 : 0.85 + rng() * 0.55;
@@ -569,8 +569,71 @@ export class Vegetation {
     }
   }
 
+  /**
+   * THE SPAWN GROVE (Chapter 5C).
+   *
+   * The cell budget can populate a region on average but cannot promise
+   * what a specific 120 m circle contains — which is why the spawn kept
+   * coming out thin in one direction or another. The grove is therefore
+   * placed explicitly, in polar coordinates around the spawn point: 76
+   * slots on a golden-angle spiral (even angular spread, even area
+   * density), jittered so it never reads as a pattern, then filtered by
+   * the same road / water / slope rules as everything else. Each cell
+   * keeps the slots that fall inside it, so the result still streams and
+   * caches per cell like the rest of the vegetation.
+   */
+  _spawnGrove(cx, cz, list) {
+    const ox = cx * CELL, oz = cz * CELL;
+    if (Math.hypot(ox + CELL * 0.5 - SPAWN_X, oz + CELL * 0.5 - SPAWN_Z) > 260) return;
+    const f = this.field;
+    const lf = f.landforms;
+    const info = this._info;
+    // Two spirals: an inner one that puts trees close enough to read
+    // from the saddle in every direction, and an outer one that fills the
+    // 60-140 m band. A lane is kept open along the spawn heading so the
+    // first ride out of the meadow is never into a trunk.
+    const INNER = 38, SLOTS = 76 + INNER;
+    for (let k = 0; k < SLOTS; k++) {
+      const inner = k < INNER;
+      const a = k * 2.39996;                                  // golden angle
+      const rad = inner
+        ? 21 + 56 * Math.pow((k + 0.5) / INNER, 0.62)         // 21-77 m
+        : 60 + 80 * Math.sqrt((k - INNER + 0.5) / (SLOTS - INNER)); // 60-140 m
+      const x = SPAWN_X + Math.cos(a) * rad + (hash01(k, 1, 0x9e1) - 0.5) * 17;
+      const z = SPAWN_Z + Math.sin(a) * rad + (hash01(k, 2, 0x9e2) - 0.5) * 17;
+      if (x < ox || x >= ox + CELL || z < oz || z >= oz + CELL) continue;
+      const dsx = x - SPAWN_X, dsz = z - SPAWN_Z;
+      const d2 = dsx * dsx + dsz * dsz;
+      if (d2 < SPAWN_CLEAR * SPAWN_CLEAR) continue;
+      // Riding lane along the spawn heading (due west), open to 50 m.
+      if (d2 < 46 * 46 && dsx < 0 && Math.abs(dsz) < 10) continue;
+      if (Math.hypot(x - 4000, z - 2500) < 30) continue;      // practice core
+      if (lf.inWater(x, z) || lf.roadDist(x, z) < 9) continue;
+      f.sample(x, z, info);
+      if (info.h < 47 || info.trail > 0.02) continue;
+      const e = 5;
+      const sl = Math.hypot(f.height(x + e, z) - info.h, f.height(x, z + e) - info.h) / e;
+      if (sl > 0.5) continue;
+      // Scattered oak and birch, as the spawn valley calls for, with the
+      // odd pine for silhouette variety.
+      const r = hash01(k, 3, 0x9e3);
+      const t = r < 0.44 ? 'oak' : r < 0.86 ? 'birch' : 'pine';
+      // Trees in the near band are the ones that must read from the
+      // saddle, so they take the upper half of the scale range.
+      const sc = (inner ? 1.05 : 0.9) + hash01(k, 4, 0x9e4) * 0.3;
+      const rF = 0.9;
+      const y = Math.min(info.h, f.height(x + rF, z), f.height(x - rF, z),
+        f.height(x, z + rF), f.height(x, z - rF)) - 0.06 * sc;
+      list.push({ t, x, z, y, yaw: hash01(k, 5, 0x9e5) * 6.283, s: sc,
+        tint: hash01(x | 0, z | 0, 0x51ce), tree: true });
+    }
+  }
+
   /** Store a finished cell job in the LRU cache and return its list. */
   _cacheCell(job) {
+    // The spawn grove is appended BEFORE the tree prefix is measured, so
+    // its trees are part of the impostor ring like any other.
+    this._spawnGrove(job.cx, job.cz, job.list);
     // Trees are generated first, so the far ring (which only draws tree
     // impostors) can stop after the tree prefix instead of walking every
     // blade of grass in all 81 cells of the window.
@@ -909,11 +972,7 @@ const GEO_BUILDERS = {
   /** Tussock: a dense straw-coloured bunch of short blades. */
   tussock() { return bladeTuft(10, 0.07, 0.44, 0.85, 0.63, 0.58, 0.3); },
   /** Reed: lakeshore stand, tall and narrow. */
-  /** Reed: tall narrow lakeshore stand. */
-  reed() { return bladeTuft(6, 0.06, 1.4, 0.16, 0.4, 0.53, 0.26); },
   /** Alpine grass: short, blue-green, hugging the ground up high. */
-  /** Alpine grass: short blue-green mat hugging the ground. */
-  alpineGrass() { return bladeTuft(6, 0.075, 0.3, 0.7, 0.36, 0.5, 0.33); },
   /** Dry bush: sparse straw-coloured twigs of the dry country. */
   dryBush() {
     const parts = [];
@@ -964,11 +1023,11 @@ const GEO_BUILDERS = {
     return mergeGeometries([colored(r, 0.52, 0.5, 0.47, 0.07),
       colored(moss, 0.28, 0.44, 0.24, 0.06)]);
   },
-  flowerY() { return flowerOf(0.95, 0.82, 0.22); },
-  flowerP() { return flowerOf(0.72, 0.42, 0.85); },
-  flowerW() { return flowerOf(0.93, 0.93, 0.95); },
+  /** Wildflower: white heads, tinted per instance into yellow, purple
+   *  or white drifts by the stand that owns them. */
+  flower() { return flowerOf(0.95, 0.93, 0.9); },
   /** Fallen log: a bare trunk lying in the grass with a broken stub. */
-  logFallen() {
+  log() {
     const g = new THREE.CylinderGeometry(0.26, 0.32, 3.4, 6);
     g.rotateZ(Math.PI / 2);
     g.translate(0, 0.3, 0);
@@ -977,17 +1036,6 @@ const GEO_BUILDERS = {
     stub.translate(1.3, 0.55, 0.15);
     return mergeGeometries([colored(g, 0.42, 0.33, 0.24, 0.05),
       colored(stub, 0.4, 0.31, 0.22, 0.04)]);
-  },
-  /** Mossy log: shorter, greener, half sunk into the forest floor. */
-  logMossy() {
-    const g = new THREE.CylinderGeometry(0.3, 0.34, 2.4, 6);
-    g.rotateZ(Math.PI / 2);
-    g.translate(0, 0.24, 0);
-    const moss = new THREE.IcosahedronGeometry(0.33, 0);
-    moss.scale(2.6, 0.4, 1.0);
-    moss.translate(0, 0.44, 0);
-    return mergeGeometries([colored(g, 0.36, 0.3, 0.23, 0.04),
-      colored(moss, 0.26, 0.42, 0.22, 0.06)]);
   },
 };
 
@@ -1060,17 +1108,17 @@ function buildZones(field) {
   // the player starts INSIDE a forest patch, with only the 46 m practice
   // core kept clear. Forest is therefore visible in every direction from
   // the very first frame, at any quality setting.
-  for (let i = 0; i < 6; i++) {
-    const a = (i / 6) * 6.283 + 0.55;
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * 6.283 + 0.4;
     const inner = i % 2 === 0;
     for (let att = 0; att < 4; att++) {
-      const d = (inner ? 150 : 240) + att * 50;
-      if (push(4000 + Math.cos(a) * d, 2500 + Math.sin(a) * d,
-        (inner ? 190 : 140) + hash01(i, att, 0x41) * 60, 0, 120)) break;
+      const d = (inner ? 110 : 190) + att * 45;
+      if (push(SPAWN_X + Math.cos(a) * d, SPAWN_Z + Math.sin(a) * d,
+        (inner ? 120 : 100) + hash01(i, att, 0x41) * 55, 0, 60)) break;
     }
   }
   // ...and the rest of the map on a jittered 7 x 5 grid (35 slots).
-  const COLS = 7, ROWS = 5;
+  const COLS = 6, ROWS = 4;
   const cw = 8000 / COLS, ch = 5000 / ROWS;
   for (let i = 0; i < COLS; i++) {
     for (let j = 0; j < ROWS; j++) {
@@ -1078,7 +1126,7 @@ function buildZones(field) {
         const jx = hash01(i, j, 0x2a11 + att * 7), jz = hash01(i, j, 0x2a12 + att * 7);
         const x = (i + 0.12 + jx * 0.76) * cw;
         const z = (j + 0.12 + jz * 0.76) * ch;
-        const r = 120 + hash01(i, j, 0x2a13) * 130;   // 120-250 m radius
+        const r = 90 + hash01(i, j, 0x2a13) * 85;     // 180-350 m WIDE
         if (push(x, z, r, 0, 430)) break;
       }
     }
@@ -1112,7 +1160,7 @@ function zoneAt(zones, x, z) {
 // Types seated on their whole footprint (anything with a trunk or a
 // boulder body); everything else is small enough for two probes.
 const TRUNKED = {};
-for (const t of [...TREES, 'logFallen', 'logMossy', 'stump', 'mossRock']) TRUNKED[t] = true;
+for (const t of [...TREES, 'log', 'stump', 'mossRock']) TRUNKED[t] = true;
 
 /** Landmarks stay approachable: no planting on a cabin, cave or bridge. */
 function nearLandmark(lf, x, z) {
