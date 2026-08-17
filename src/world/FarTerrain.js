@@ -36,6 +36,27 @@ function shadeVertices(geo) {
     let r = col[v] * shade, g = col[v + 1] * shade, b = col[v + 2] * shade;
     if (lit > 0) { r += lit * 0.11; g += lit * 0.07; b -= lit * 0.035; }
     else { r += lit * 0.05; g += lit * 0.02; b -= lit * 0.075; }
+    // Chapter 6B — mirror the near tiles' SLOPE WEAR. The tile builder
+    // now bares the earth on anything steep; without the same pass here a
+    // mountain flank changed colour the moment a streamed tile took over
+    // from the backdrop, which is the tone step Chapter 5 spent a pass
+    // removing. The backdrop's 62.5 m grid gives softer normals, so the
+    // effect is naturally gentler at range — which is what we want.
+    const steep = ny < 0.90 ? (0.90 - ny) / 0.54 : 0;
+    if (steep > 0) {
+      const w = steep > 1 ? 1 : steep;
+      r += (0.44 - r) * w * 0.44;
+      g += (0.36 - g) * w * 0.44;
+      b += (0.26 - b) * w * 0.44;
+    }
+    // Chapter 6B — no altitude haze here. Mixing high backdrop ground
+    // toward the horizon colour did separate the mountain layers, but it
+    // applies to the BACKDROP ONLY: the near tiles have no matching term,
+    // so ground at the same altitude changed colour the moment a streamed
+    // tile took over, and where the coarse mesh poked through it showed
+    // as a flat pale slab in the middle distance. Distance haze has to
+    // come from fog, which is a function of camera distance and therefore
+    // agrees across both LODs by construction.
     col[v] = r < 0 ? 0 : r;
     col[v + 1] = g < 0 ? 0 : g;
     col[v + 2] = b < 0 ? 0 : b;

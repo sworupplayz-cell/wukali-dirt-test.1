@@ -316,6 +316,35 @@ export class TerrainTiles {
           let cb = col[v * 3 + 2] * shade;
           if (lit > 0) { cr += lit * 0.11; cg += lit * 0.07; cb -= lit * 0.035; }
           else { cr += lit * 0.05; cg += lit * 0.02; cb -= lit * 0.075; }
+          // ---- Chapter 6B GROUND PAINTING (slope + aspect) ------------
+          // The palette is a pure function of (x, z, height, moisture),
+          // so it cannot know whether a point is a flat meadow or a steep
+          // bank — and a hand-painted world is mostly that distinction.
+          // The normal is already here, so it costs nothing.
+          //
+          // 3. SLOPE WEAR. Grass thins on anything steep and the earth
+          //    underneath shows through, warm and desaturated. `ny` is
+          //    the cosine of the slope, so this engages from about 25 deg
+          //    and is full on a cliff.
+          const steep = ny < 0.90 ? (0.90 - ny) / 0.54 : 0;
+          if (steep > 0) {
+            const w = steep > 1 ? 1 : steep;
+            cr += (0.44 - cr) * w * 0.44;
+            cg += (0.36 - cg) * w * 0.44;
+            cb += (0.26 - cb) * w * 0.44;
+          }
+          // 4. HOLLOW LUSHNESS. Water collects where the surface is
+          //    concave, so gullies and valley floors take a cooler, more
+          //    saturated green. Convex ground (ridge lines, banks) dries
+          //    out. Together with slope wear this is what makes the
+          //    ground read as painted terrain rather than a tinted mesh.
+          if (curv > 0) {
+            const w = curv * 0.42;
+            cr += (0.26 - cr) * w; cg += (0.47 - cg) * w; cb += (0.25 - cb) * w;
+          } else {
+            const w = -curv * 0.22;
+            cr += (0.58 - cr) * w; cg += (0.54 - cg) * w; cb += (0.33 - cb) * w;
+          }
           col[v * 3] = cr < 0 ? 0 : cr;
           col[v * 3 + 1] = cg < 0 ? 0 : cg;
           col[v * 3 + 2] = cb < 0 ? 0 : cb;

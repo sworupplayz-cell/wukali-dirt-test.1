@@ -77,11 +77,15 @@ const TYPES = [...TREES, ...BUSHES, ...GRASSES, ...FLOWERS, ...GROUND, ...DETAIL
  * looks into. That is what made the forest read as decorative.
  */
 const TREE_H = {
-  pine: [12, 18],
-  fir: [10, 16],
-  oak: [8, 14],
-  birch: [7, 12],
-  dead: [6, 10],
+  // Chapter 6B nudges the mature end of each range up ~10%. 5D sized the
+  // trees against the brief's numbers; in the built world the canopy sat
+  // just under the eye line on rising ground, so the forest kept reading
+  // as scenery beside the rider rather than as cover over them.
+  pine: [13, 20],
+  fir: [11, 17.5],
+  oak: [9, 15],
+  birch: [8, 13],
+  dead: [6.5, 11],
 };
 /** Draw a mature height for a tree species (metres); 0 if not a tree. */
 function treeHeight(t, r) {
@@ -1003,9 +1007,20 @@ export class Vegetation {
       // never changes shade when the window is rebuilt.
       const t = p.tint, u = 1 - t;
       const co = slot * 3;
-      ic.array[co] = 0.86 + 0.3 * t;
-      ic.array[co + 1] = 0.9 + 0.2 * u;
-      ic.array[co + 2] = 0.82 + 0.26 * t * u * 2;
+      if (TREE_H[p.t]) {
+        // Chapter 6B — CANOPY VARIATION. A separate curve for trees: the
+        // sward tint above is built to swing toward straw, which on a
+        // conifer just looks dead. This one runs deep blue-green to warm
+        // olive and keeps the value range narrow, so a stand reads as
+        // many individuals of one species rather than as a colour riot.
+        ic.array[co] = 0.80 + 0.34 * t;
+        ic.array[co + 1] = 0.92 + 0.14 * u;
+        ic.array[co + 2] = 0.94 - 0.26 * t;
+      } else {
+        ic.array[co] = 0.86 + 0.3 * t;
+        ic.array[co + 1] = 0.9 + 0.2 * u;
+        ic.array[co + 2] = 0.82 + 0.26 * t * u * 2;
+      }
     }
   }
 }
@@ -1312,6 +1327,12 @@ function flowerOf(cr, cg, cb) {
 // Families that carry per-instance colour variation.
 const TINTED = {};
 for (const t of [...GRASSES, ...FLOWERS, ...BUSHES, 'clover', 'fern', 'mossRock']) TINTED[t] = true;
+// Chapter 6B: TREES take a per-instance tint as well. Every trunk in the
+// world shared one material and therefore exactly one green, so a
+// hillside of eighty pines read as eighty copies of one pine. The tint
+// costs three floats per instance and no extra draw call (see _write),
+// and it is the single biggest colour win available in the forest.
+for (const t of TREES) TINTED[t] = true;
 
 /**
  * FOREST PATCHES (hotfix 5B.1).
@@ -1436,7 +1457,17 @@ function zoneAt(zones, x, z) {
     const rel = d / R;
     if (zo.clear && rel < zo.clear) continue;   // interior clearing
     // Dense core, thinning to a natural edge.
-    const w = (1 - sstep(0.42, 1, rel)) * zo.strength;
+    //
+    // Chapter 6B — FOREST EDGE DENSITY. The falloff was a clean
+    // smoothstep, so every wood ended on a tidy contour: density dropped
+    // evenly all the way round and the boundary read as a mown line from
+    // any distance. Two changes. The core holds full density further out
+    // (0.42 -> 0.55) so a wood has a body rather than a peak, and the
+    // remaining edge is broken by a 40 m noise field that pushes the
+    // margin in and out by a third of its width — outliers standing clear
+    // of the wood on one bearing, a bay of open ground on the next.
+    const fray = (vnoise(x * 0.025 + 61.7, z * 0.025 - 43.2, 0x6b1) - 0.5) * 0.34;
+    const w = (1 - sstep(0.55, 1.02 + fray, rel)) * zo.strength;
     if (w > bestW) { bestW = w; best = zo; }
   }
   return best ? { zone: best, w: bestW } : null;

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { HORIZON } from '../world/palette.js';
 
 /**
  * Graphics (Chapter 3C) — the complete graphics quality system.
@@ -117,9 +118,9 @@ export class Graphics {
     if (d.fogQuality === 0) {
       // Simplified fog: linear (cheapest shader path).
       const end = 1.9 / fogD;
-      world.scene.fog = new THREE.Fog(new THREE.Color(0xc9dfec), end * 0.22, end);
+      world.scene.fog = new THREE.Fog(new THREE.Color(HORIZON), end * 0.22, end);
     } else {
-      world.scene.fog = new THREE.FogExp2(new THREE.Color(0xc9dfec), fogD);
+      world.scene.fog = new THREE.FogExp2(new THREE.Color(HORIZON), fogD);
     }
     g.camera.far = FAR_D[d.renderDist] ?? 7000;
     g.camera.updateProjectionMatrix();

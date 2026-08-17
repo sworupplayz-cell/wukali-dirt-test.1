@@ -1,6 +1,15 @@
 import { sstep, vnoise } from './noise.js';
 
 /**
+ * Chapter 6B — the horizon/haze colour, shared by the sky gradient, the
+ * scene fog and the far backdrop so all three agree exactly. A single
+ * flat pale blue (0xc9dfec) made every distance read the same: it is
+ * slightly warmer and lighter now, which is what lets aerial perspective
+ * separate a ridge at 400 m from a massif at 3 km.
+ */
+export const HORIZON = 0xd3e2ea;
+
+/**
  * Shared terrain palette — vertex colors only, no textures.
  * Used by both the near tile builder and the far backdrop mesh so LOD
  * levels always agree on color.
@@ -19,6 +28,14 @@ import { sstep, vnoise } from './noise.js';
  *   - colour push: saturation lifted away from local luminance
  *   - roads: three-scale organic edge, dusty/damp stretches, grass
  *     creeping back over quiet shoulders
+ *
+ * Chapter 6B — the world was drab: every band converged on one olive,
+ * so a meadow, a hillside and a mountain flank at 1 km all read as the
+ * same khaki. The fix is HUE SEPARATION rather than more noise. Grass
+ * variation now swings hue (fresh blue-green to golden straw) instead of
+ * just brightness, the dry upland band is gated on moisture so it stops
+ * painting every hill the same colour, and the rock band carries warm
+ * and cool strata instead of a single grey.
  *
  * Bands: moist grass -> dry scrub -> alpine rock -> snow, with the dirt
  * road tint applied last so roads stay readable at any altitude.
@@ -42,33 +59,62 @@ export function colorFor(info, out, x = 0, z = 0) {
   const stand = vnoise(x * 0.021 - 9.4, z * 0.021 + 2.8, 915) - 0.5;
   const speck = vnoise(x * 0.045 + 1.3, z * 0.045 + 8.6, 913) - 0.5;
   const gv = patch * 0.11 + stand * 0.07 + speck * 0.05;
+  // Chapter 6B — MEADOW MOOD. A 300 m field that swings a whole sward
+  // between fresh growth and sun-cured straw. This is a HUE rotation, not
+  // a brightness change: red climbs while blue falls, so neighbouring
+  // meadows read as different grasses rather than the same grass under
+  // different light. It is the single change that takes the lowland out
+  // of its one flat green.
+  const mood = (vnoise(x * 0.0033 + 17.9, z * 0.0033 - 24.1, 951) - 0.5) * 2; // -1..1
+  const golden = Math.max(0, mood), fresh = Math.max(0, -mood);
 
   // Lowland grass (variation shifts hue between lush and straw).
   let r = 0.50 - 0.20 * m + gv * 0.9;
   let g = 0.60 - 0.10 * m + gv * 0.4;
   let b = 0.29 - 0.06 * m - gv * 0.3;
+  r += golden * 0.14 - fresh * 0.07;
+  g += golden * 0.045 + fresh * 0.045;
+  b -= golden * 0.075 - fresh * 0.055;
 
   // Chapter 6 — the bands follow the rebuilt elevation range (the whole
   // rolling country now lives between ~45 m and ~130 m, so the old
   // 110-1650 m bands would have painted the entire world as scrub).
   // Damp, lush ground in the valley bottoms where water collects...
   const lush = sstep(88, 52, h);
-  r += (0.34 - r) * lush * 0.45; g += (0.52 - g) * lush * 0.45; b += (0.22 - b) * lush * 0.45;
-  // ...sun-bleached grass along the ridge crests above them.
-  const dry = sstep(96, 145, h);
-  r += (0.60 - r) * dry * 0.55; g += (0.56 - g) * dry * 0.55; b += (0.34 - b) * dry * 0.55;
+  r += (0.30 - r) * lush * 0.5; g += (0.53 - g) * lush * 0.5; b += (0.24 - b) * lush * 0.5;
+  // ...sun-bleached grass along the ridge crests above them. Chapter 6B
+  // gates this on MOISTURE as well as altitude. Keyed on height alone it
+  // painted every square metre above 145 m the same khaki, which is why
+  // the uplands had no colour of their own.
+  const dry = sstep(96, 165, h) * (0.45 + 0.55 * sstep(0.62, 0.24, m));
+  r += (0.62 - r) * dry * 0.55; g += (0.55 - g) * dry * 0.55; b += (0.31 - b) * dry * 0.55;
+  // Chapter 6B — upland pasture. Between the meadows and the rock the
+  // ground now keeps a cool green of its own instead of dissolving
+  // straight into scrub, so a hillside at 200-400 m reads as grazing
+  // country rather than as dust.
+  const pasture = sstep(130, 210, h) * (1 - sstep(300, 480, h)) * sstep(0.3, 0.6, m);
+  r += (0.34 - r) * pasture * 0.5; g += (0.50 - g) * pasture * 0.5; b += (0.30 - b) * pasture * 0.5;
 
   // Alpine rock band with strata variation.
-  const rock = sstep(260, 720, h);
+  // Chapter 6B: the rock band used to start at 260 m and be fully rock by
+  // 720 m — but the conifer belt runs to about 700 m, so every forested
+  // hillside was painted as scree with trees standing in it. Moved up to
+  // sit ABOVE the tree line; the massifs (800-2,200 m) are unaffected.
+  const rock = sstep(360, 860, h);
   if (rock > 0) {
     // Rock colour variation: bedding planes plus a finer grain break-up,
-    // so a face is never one flat grey.
-    const strata = (vnoise(x * 0.006 + h * 0.004, z * 0.006, 917) - 0.5) * 0.11 +
-      (vnoise(x * 0.038 + 4.1, z * 0.038 - 6.3, 921) - 0.5) * 0.05;
-    r += (0.46 + 0.05 * m + strata - r) * rock;
-    g += (0.42 + 0.04 * m + strata - g) * rock;
-    b += (0.38 + 0.03 * m + strata * 0.7 - b) * rock;
+    // so a face is never one flat grey. Chapter 6B splits the bands into
+    // WARM (iron-stained) and COOL (slate) strata rather than lightening
+    // and darkening a single grey.
+    const bed = vnoise(x * 0.006 + h * 0.004, z * 0.006, 917) - 0.5;
+    const grain = (vnoise(x * 0.038 + 4.1, z * 0.038 - 6.3, 921) - 0.5) * 0.05;
+    const strata = bed * 0.11 + grain;
+    const warmBand = Math.max(0, bed) * 0.9, coolBand = Math.max(0, -bed) * 0.9;
+    r += (0.47 + 0.05 * m + strata + warmBand * 0.10 - coolBand * 0.04 - r) * rock;
+    g += (0.42 + 0.04 * m + strata + warmBand * 0.03 - coolBand * 0.01 - g) * rock;
+    b += (0.38 + 0.03 * m + strata * 0.7 - warmBand * 0.05 + coolBand * 0.09 - b) * rock;
   }
+
 
   // Snow cap.
   const snow = sstep(950, 1400, h);
@@ -173,20 +219,25 @@ export function colorFor(info, out, x = 0, z = 0) {
   // near tiles and the far backdrop agree exactly and nothing shimmers).
   // Big scenery reads flat when every hillside gets identical light;
   // this is the single cheapest way to give the world depth at range.
+  // Chapter 6B deepens them: at 0.13 they were barely legible past
+  // 200 m, and cloud shadow is most of what makes a wide valley read as
+  // a wide valley rather than a painted backdrop.
   const cloud = vnoise(x * 0.0014 - 6.3, z * 0.0014 + 11.7, 947);
-  if (cloud < 0.46) {
-    const sh = (0.46 - cloud) * 2.0;      // 0..~0.9
-    const k = 1 - 0.13 * sh;
-    r *= k; g *= k * 1.004; b *= k * 1.03; // shadows go blue, not grey
+  if (cloud < 0.48) {
+    const sh = (0.48 - cloud) * 2.0;      // 0..~0.95
+    const k = 1 - 0.19 * sh;
+    r *= k; g *= k * 1.006; b *= k * 1.045; // shadows go blue, not grey
   }
 
   // Chapter 5 — depth of colour. Low-poly ground looks flat when every
   // channel sits in the same narrow band, so push saturation away from
   // the local luminance a touch (a painter's "push the colour" pass).
+  // Chapter 6B lifts 0.16 -> 0.26; the whole point of the style is that
+  // colour, not texture, carries the surface.
   const lum = r * 0.35 + g * 0.5 + b * 0.15;
-  r += (r - lum) * 0.16;
-  g += (g - lum) * 0.16;
-  b += (b - lum) * 0.16;
+  r += (r - lum) * 0.26;
+  g += (g - lum) * 0.26;
+  b += (b - lum) * 0.26;
 
   out[0] = r < 0 ? 0 : r;
   out[1] = g < 0 ? 0 : g;

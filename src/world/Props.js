@@ -36,6 +36,8 @@ const CAP = { flags: 48, sign: 48, lookout: 24, cabin: 32, cave: 24,
   // capacity is a few hundred bytes of matrix each, and the draw-call
   // count does not move (still one InstancedMesh per model).
   rocks: 96, boulder: 64, slab: 56, spire: 32, scree: 128 };
+// Chapter 6B: families that take a per-instance stone tint.
+const STONE = { rocks: 1, boulder: 1, slab: 1, spire: 1, scree: 1 };
 
 export class Props {
   constructor(scene, field) {
@@ -91,6 +93,18 @@ export class Props {
     for (const [k, t] of Object.entries(this.types)) {
       const m = new THREE.InstancedMesh(t.geo, t.mat, t.max);
       m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      // Chapter 6B — ROCK MATERIAL VARIATION. Every stone in the world
+      // shared one material, so a scree fan was a hundred identical grey
+      // chips and a boulder field read as clones. STONE families now
+      // carry a per-instance tint: three floats, no extra draw call, no
+      // extra material. Warm iron-stained through neutral to cool slate,
+      // with the value varying independently so wet-looking dark stone
+      // sits next to sun-bleached pale stone.
+      if (STONE[k]) {
+        m.instanceColor = new THREE.InstancedBufferAttribute(
+          new Float32Array(t.max * 3), 3);
+        m.instanceColor.setUsage(THREE.DynamicDrawUsage);
+      }
       m.count = 0;
       m.frustumCulled = false; // instances span the whole 1.5 km window
       scene.add(m);
@@ -370,7 +384,21 @@ export class Props {
         this._e.set(0, p.yaw, 0);
         this._q.setFromEuler(this._e);
         this._s.setScalar(p.s);
-        this.meshes[p.t].setMatrixAt(n, this._m.compose(this._p, this._q, this._s));
+        const mesh = this.meshes[p.t];
+        mesh.setMatrixAt(n, this._m.compose(this._p, this._q, this._s));
+        if (mesh.instanceColor) {
+          // Deterministic from world position, so a stone keeps its
+          // colour when the streaming window rebuilds around it.
+          if (p.tint === undefined) {
+            p.tint = hash01(p.x | 0, p.z | 0, 0x6b57);
+            p.tval = hash01(p.z | 0, p.x | 0, 0x6b58);
+          }
+          const w = p.tint, v = 0.84 + 0.30 * p.tval;
+          const co = n * 3;
+          mesh.instanceColor.array[co] = v * (0.92 + 0.20 * w);
+          mesh.instanceColor.array[co + 1] = v * (0.96 + 0.05 * w);
+          mesh.instanceColor.array[co + 2] = v * (1.10 - 0.22 * w);
+        }
         counts[p.t] = n + 1;
         total++;
         if (t.shape) {
@@ -389,6 +417,7 @@ export class Props {
     for (const [k, m] of Object.entries(this.meshes)) {
       m.count = counts[k];
       m.instanceMatrix.needsUpdate = true;
+      if (m.instanceColor) m.instanceColor.needsUpdate = true;
     }
     this.count = total;
     this.collVersion = (this.collVersion || 0) + 1;

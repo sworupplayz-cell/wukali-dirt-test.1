@@ -6,6 +6,7 @@ import { FarTerrain } from './FarTerrain.js';
 import { Props } from './Props.js';
 import { Vegetation } from './Vegetation.js';
 import { skyGradient } from './textures.js';
+import { HORIZON } from './palette.js';
 
 /**
  * SectorWorld — Horizon Ride fixed-world streaming engine.
@@ -305,8 +306,14 @@ export class SectorWorld {
     // dissolves exactly into the sky band it sits against, WARM low sun +
     // COOL blue ambient (classic stylized complementary lighting).
     scene.background = skyGradient();
-    scene.fog = new THREE.FogExp2(new THREE.Color(0xc9dfec), 0.00042);
-    scene.add(new THREE.HemisphereLight(0xbcd6f5, 0x8a7a52, 0.85)); // cool sky / warm bounce
+    // Chapter 6B — ATMOSPHERIC DEPTH. The haze colour is shared with the
+    // sky gradient and the far backdrop (HORIZON), so ground, fog and sky
+    // all resolve to the same value at the horizon instead of leaving a
+    // visible band. Density is up ~19%: at 0.00042 a massif at 3 km was
+    // arriving nearly unhazed and sat at the same value as the ridge
+    // 400 m away, which is why the wide views read flat.
+    scene.fog = new THREE.FogExp2(new THREE.Color(HORIZON), 0.0005);
+    scene.add(new THREE.HemisphereLight(0xc2dbf7, 0x94825a, 0.9)); // cool sky / warm bounce
     const sun = new THREE.DirectionalLight(0xffe3b0, 1.35);         // warm afternoon sun
     sun.position.set(70, 75, 40);
     // Chapter 3C: shadow rig (enabled/sized by the Graphics system).

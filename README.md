@@ -186,6 +186,63 @@ carry the colour variety, so three wildflower meshes became one, six
 grasses became four and two logs became one. Five fewer InstancedMeshes
 brought draw calls at the spawn from 99 to **96**.
 
+**Chapter 6B — world art pass.** The world was drab. Every band in the
+palette converged on one olive, so a meadow, a hillside and a mountain
+flank a kilometre away all read as the same khaki, and eighty pines on a
+slope read as eighty copies of one pine. No geometry changed here; this
+is colour.
+
+**Hue separation, not more noise.** Grass gained a 300 m *meadow mood*
+field that swings a whole sward between fresh growth and sun-cured straw
+as a hue rotation — red climbs while blue falls — so neighbouring
+meadows read as different grasses rather than the same grass under
+different light. The dry upland band is now gated on moisture as well as
+altitude (keyed on height alone it painted every square metre above
+145 m the same khaki), a cool *upland pasture* band was added between
+the meadows and the rock, and the rock band itself moved from 260-720 m
+up to 360-860 m: the conifer belt runs to about 700 m, so forested
+hillsides were being painted as scree with trees standing in them. Rock
+strata split into warm iron-stained and cool slate bands instead of one
+grey lightening and darkening.
+
+**Ground painting** happens in the tile builder, where the vertex normal
+already exists and costs nothing. Grass thins on anything steeper than
+about 25 degrees and the warm earth shows through; concave ground —
+gullies, valley floors — takes a cooler, more saturated green while
+convex ridge lines and banks dry out. That slope pass is mirrored exactly
+in the far backdrop, because the two LODs sharing a palette is a hard
+invariant here.
+
+**Canopy variation.** Trees now carry a per-instance tint like the sward
+already did — three floats per instance, no extra draw call, no extra
+material — on a curve of their own that runs deep blue-green to warm
+olive. The sward curve swings toward straw, which on a conifer just looks
+dead. Mature heights went up about 10% (pine 13-20 m), and the forest
+edge falloff holds full density further out (0.42 -> 0.55 of the patch
+radius) with the remaining margin broken by a 40 m noise field, so a wood
+ends in outliers and bays instead of on a tidy contour. Stone families
+took a per-instance tint too, warm through neutral to cool slate.
+
+**Atmosphere.** The horizon colour is now a single exported constant
+shared by the sky gradient, the scene fog and the backdrop, so all three
+resolve to the same value at the skyline instead of leaving a band. The
+sky runs four stops rather than three; cloud shadows deepened from 0.13
+to 0.19 (at the old value they were illegible past 200 m, and cloud
+shadow is most of what makes a wide valley read as a wide valley); and
+the saturation push went 0.16 -> 0.26, because the whole point of the
+style is that colour, not texture, carries the surface.
+
+One thing was tried and reverted: mixing high backdrop ground toward the
+horizon colour to separate the mountain layers. It works in isolation but
+applies to the backdrop only, so ground at the same altitude changed
+colour the moment a streamed tile took over, and where the coarse mesh
+poked through it showed as a flat pale slab in the middle distance.
+Distance haze has to come from fog, which is a function of camera
+distance and therefore agrees across both LODs by construction.
+
+Draw calls at the five preview points are 79-119, unchanged from before
+the pass. Preview frames are in `shots/`.
+
 **Chapter 6A — macro terrain composition.** The lowland was carrying its
 whole shape in noise: ridged fields at ~190 m and ~80 m wavelengths that
 were statistically interesting and structurally meaningless. A quarter of

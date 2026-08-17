@@ -136,10 +136,17 @@ export function skyGradient() {
   const cv = document.createElement('canvas');
   cv.width = 4; cv.height = 128;
   const ctx = cv.getContext('2d');
+  // Chapter 6B: four stops instead of three. A two-segment ramp put the
+  // whole sky in one blue; the extra stop lets the band just above the
+  // horizon go pale and slightly warm, which is what reads as depth in
+  // the distance and gives the mountain silhouettes something to sit
+  // against. The bottom stop matches HORIZON in palette.js exactly, so
+  // the fog dissolves into the sky with no visible seam.
   const g = ctx.createLinearGradient(0, 0, 0, 128);
-  g.addColorStop(0, '#5d9bd3');    // zenith
-  g.addColorStop(0.55, '#8fc2e6'); // mid
-  g.addColorStop(1, '#cfe4ef');    // horizon haze
+  g.addColorStop(0, '#4a8ccc');    // zenith, deeper
+  g.addColorStop(0.42, '#7db6e4'); // upper
+  g.addColorStop(0.78, '#aed3ea'); // lower, cooling out
+  g.addColorStop(1, '#d3e2ea');    // horizon haze (== HORIZON)
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 4, 128);
   const tex = new THREE.CanvasTexture(cv);
